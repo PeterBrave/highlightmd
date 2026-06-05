@@ -1,0 +1,17 @@
+{
+  "name": "MarkLens",
+  "short_name": "MarkLens",
+  "description": "Local-first Markdown review reader with smart highlights and presentation mode.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8f5",
+  "theme_color": "#126d63",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

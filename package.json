@@ -1,0 +1,23 @@
+{
+  "name": "highlightmd",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace @highlightmd/web run dev",
+    "build": "npm --workspace @highlightmd/web run build",
+    "preview": "npm --workspace @highlightmd/web run preview",
+    "typecheck": "npm --workspace @highlightmd/web run typecheck",
+    "bench:web": "node scripts/bench-web.mjs"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "playwright": "^1.60.0",
+    "typescript": "^5.4.5",
+    "vite": "^8.0.16"
+  }
+}
