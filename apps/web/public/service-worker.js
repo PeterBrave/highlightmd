@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marklens-v1'
+const CACHE_NAME = 'marklens-v2'
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icon.svg']
 
 self.addEventListener('install', (event) => {
@@ -15,6 +15,11 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+
+  if (event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request).catch(() => caches.match('/')))
+    return
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {

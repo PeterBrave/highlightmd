@@ -301,7 +301,7 @@ export function App() {
           </div>
 
           <article
-            className="markdown-reader"
+            className="markdown-body markdown-reader"
             style={{ fontSize, lineHeight }}
           >
             {visibleBlocks.map((block) => (
