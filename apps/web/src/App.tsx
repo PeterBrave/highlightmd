@@ -1,16 +1,6 @@
-import {
-  type CSSProperties,
-  memo,
-  type PointerEvent as ReactPointerEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition,
-} from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Download,
-  FileInput,
   Focus,
   Moon,
   PanelRight,
@@ -40,25 +30,20 @@ const maxAutosaveBytes = 512 * 1024
 
 export function App() {
   const [source, setSource] = useState(defaultSource)
-  const [, startSourceTransition] = useTransition()
   const [mode, setMode] = useState<HighlightMode>('review')
   const [theme, setTheme] = useState<Theme>('light')
   const [fontSize, setFontSize] = useState(17)
   const [lineHeight, setLineHeight] = useState(1.7)
   const [showOutline, setShowOutline] = useState(true)
   const [presentation, setPresentation] = useState(false)
-  const [editorOpen, setEditorOpen] = useState(true)
-  const [editorWidth, setEditorWidth] = useState(() => {
-    const saved = Number(localStorage.getItem('highlightmd:editorWidth'))
-    return Number.isFinite(saved) && saved >= 280 ? saved : 460
-  })
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [fileName, setFileName] = useState('sample.md')
   const [renderLimit, setRenderLimit] = useState(initialRenderBlocks)
   const [blocks, setBlocks] = useState<DocBlock[]>([])
   const [segmentationMs, setSegmentationMs] = useState<number | null>(null)
   const workerRef = useRef<Worker | null>(null)
   const requestIdRef = useRef(0)
-  const editorRef = useRef<HTMLTextAreaElement | null>(null)
+  const editRangeRef = useRef<{ index: number; start: number; end: number } | null>(null)
 
   const visibleBlocks = useMemo(() => blocks.slice(0, renderLimit), [blocks, renderLimit])
   const outline = useMemo(() => extractOutline(blocks), [blocks])
@@ -120,12 +105,6 @@ export function App() {
   }, [source])
 
   useEffect(() => {
-    const editor = editorRef.current
-    if (!editor || document.activeElement === editor || editor.value === source) return
-    editor.value = source
-  }, [source])
-
-  useEffect(() => {
     let cancelled = false
     let currentLimit = Math.min(initialRenderBlocks, blocks.length)
 
@@ -158,10 +137,6 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
-
-  useEffect(() => {
-    localStorage.setItem('highlightmd:editorWidth', String(Math.round(editorWidth)))
-  }, [editorWidth])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -201,25 +176,26 @@ export function App() {
     URL.revokeObjectURL(href)
   }
 
-  function startResize(event: ReactPointerEvent<HTMLButtonElement>) {
-    event.preventDefault()
-    const startX = event.clientX
-    const startWidth = editorWidth
-    const pointerId = event.pointerId
-    event.currentTarget.setPointerCapture(pointerId)
+  function beginBlockEdit(block: DocBlock, index: number) {
+    editRangeRef.current = { index, start: block.start, end: block.end }
+    setEditingIndex(index)
+  }
 
-    function handleMove(moveEvent: PointerEvent) {
-      const nextWidth = startWidth + moveEvent.clientX - startX
-      setEditorWidth(clamp(nextWidth, 300, Math.min(760, window.innerWidth - 560)))
-    }
+  function patchEditingBlock(index: number, nextRaw: string) {
+    const range = editRangeRef.current
+    if (!range || range.index !== index) return
 
-    function handleUp() {
-      window.removeEventListener('pointermove', handleMove)
-      window.removeEventListener('pointerup', handleUp)
-    }
+    setSource((currentSource) => {
+      const nextSource =
+        currentSource.slice(0, range.start) + nextRaw + currentSource.slice(range.end)
+      range.end = range.start + nextRaw.length
+      return nextSource
+    })
+  }
 
-    window.addEventListener('pointermove', handleMove)
-    window.addEventListener('pointerup', handleUp)
+  function endBlockEdit() {
+    editRangeRef.current = null
+    setEditingIndex(null)
   }
 
   return (
@@ -227,7 +203,7 @@ export function App() {
       className={[
         'app-shell',
         presentation ? 'is-presentation' : '',
-        editorOpen ? 'has-editor' : 'reader-only',
+        'reader-only',
       ].join(' ')}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
@@ -290,9 +266,6 @@ export function App() {
               onChange={(event) => handleFiles(event.target.files)}
             />
           </label>
-          <button title="Toggle editor" type="button" onClick={() => setEditorOpen((v) => !v)}>
-            <FileInput size={18} />
-          </button>
           <button title="Toggle outline" type="button" onClick={() => setShowOutline((v) => !v)}>
             <PanelRight size={18} />
           </button>
@@ -308,42 +281,23 @@ export function App() {
         </div>
       </header>
 
-      <main
-        className="workspace"
-        style={editorOpen ? ({ '--editor-width': `${editorWidth}px` } as CSSProperties) : undefined}
-      >
-        {editorOpen && (
-          <aside className="editor-pane">
-            <textarea
-              aria-label="Markdown source"
-              defaultValue={source}
-              ref={editorRef}
-              spellCheck={false}
-              onChange={(event) => {
-                const nextSource = event.currentTarget.value
-                startSourceTransition(() => setSource(nextSource))
-              }}
-            />
-          </aside>
-        )}
-
-        {editorOpen && (
-          <button
-            aria-label="Resize editor"
-            className="resize-handle"
-            onPointerDown={startResize}
-            title="Resize editor"
-            type="button"
-          />
-        )}
-
+      <main className="workspace">
         <section className="reader-pane">
           <article
             className="markdown-body markdown-reader"
             style={{ fontSize, lineHeight }}
           >
-            {visibleBlocks.map((block) => (
-              <RenderedBlock block={block} key={block.id} mode={mode} />
+            {visibleBlocks.map((block, index) => (
+              <RenderedBlock
+                block={block}
+                blockIndex={index}
+                isEditing={editingIndex === index}
+                key={`${index}-${block.start}-${block.type}`}
+                mode={mode}
+                onBeginEdit={() => beginBlockEdit(block, index)}
+                onEndEdit={endBlockEdit}
+                onPatch={patchEditingBlock}
+              />
             ))}
             {isRendering && (
               <div className="render-progress" aria-live="polite">
@@ -388,13 +342,31 @@ export function App() {
 
 const RenderedBlock = memo(function RenderedBlock({
   block,
+  blockIndex,
+  isEditing,
   mode,
+  onBeginEdit,
+  onEndEdit,
+  onPatch,
 }: {
   block: DocBlock
+  blockIndex: number
+  isEditing: boolean
   mode: HighlightMode
+  onBeginEdit: () => void
+  onEndEdit: () => void
+  onPatch: (index: number, nextRaw: string) => void
 }) {
   const blockRef = useRef<HTMLElement | null>(null)
+  const [draft, setDraft] = useState(block.raw)
   const html = useMemo(() => renderMarkdownBlock(block.raw, mode), [block.hash, block.raw, mode])
+  const draftHtml = useMemo(() => renderMarkdownBlock(draft, mode), [draft, mode])
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraft(block.raw)
+    }
+  }, [block.raw, isEditing])
 
   useEffect(() => {
     const element = blockRef.current
@@ -421,11 +393,49 @@ const RenderedBlock = memo(function RenderedBlock({
 
   return (
     <section
-      className={`ml-block ml-block-${block.type}`}
+      className={`ml-block ml-block-${block.type} ${isEditing ? 'is-editing-block' : ''}`}
       data-block-id={block.id}
+      onDoubleClick={onBeginEdit}
       ref={blockRef}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    >
+      {isEditing ? (
+        <div className="block-editor">
+          <textarea
+            autoFocus
+            className="block-editor-input"
+            spellCheck={false}
+            value={draft}
+            onBlur={onEndEdit}
+            onChange={(event) => {
+              const nextDraft = event.currentTarget.value
+              setDraft(nextDraft)
+              onPatch(blockIndex, nextDraft)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.currentTarget.blur()
+              }
+            }}
+          />
+          <div
+            className="block-editor-preview"
+            dangerouslySetInnerHTML={{ __html: draftHtml }}
+          />
+        </div>
+      ) : (
+        <>
+          <button
+            aria-label="Edit block"
+            className="block-edit-button"
+            onClick={onBeginEdit}
+            type="button"
+          >
+            Edit
+          </button>
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+        </>
+      )}
+    </section>
   )
 })
 
@@ -457,8 +467,4 @@ function scheduleIdle(callback: () => void) {
 
   const id = globalThis.setTimeout(callback, 16)
   return () => globalThis.clearTimeout(id)
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max)
 }
