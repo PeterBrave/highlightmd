@@ -43,7 +43,13 @@ export function App() {
   const [segmentationMs, setSegmentationMs] = useState<number | null>(null)
   const workerRef = useRef<Worker | null>(null)
   const requestIdRef = useRef(0)
-  const editRangeRef = useRef<{ index: number; start: number; end: number } | null>(null)
+  const sourceRef = useRef(source)
+  const editRangeRef = useRef<{
+    index: number
+    start: number
+    end: number
+    suffix: string
+  } | null>(null)
 
   const visibleBlocks = useMemo(() => blocks.slice(0, renderLimit), [blocks, renderLimit])
   const outline = useMemo(() => extractOutline(blocks), [blocks])
@@ -73,6 +79,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    sourceRef.current = source
     const id = requestIdRef.current + 1
     requestIdRef.current = id
     setSegmentationMs(null)
@@ -177,7 +184,12 @@ export function App() {
   }
 
   function beginBlockEdit(block: DocBlock, index: number) {
-    editRangeRef.current = { index, start: block.start, end: block.end }
+    editRangeRef.current = {
+      index,
+      start: block.start,
+      end: block.end,
+      suffix: getBlockSuffix(block.raw),
+    }
     setEditingIndex(index)
   }
 
@@ -185,12 +197,16 @@ export function App() {
     const range = editRangeRef.current
     if (!range || range.index !== index) return
 
-    setSource((currentSource) => {
-      const nextSource =
-        currentSource.slice(0, range.start) + nextRaw + currentSource.slice(range.end)
-      range.end = range.start + nextRaw.length
-      return nextSource
-    })
+    const currentSource = sourceRef.current
+    const rawWithBoundary = nextRaw.endsWith(range.suffix)
+      ? nextRaw
+      : `${nextRaw}${range.suffix}`
+    const nextSource =
+      currentSource.slice(0, range.start) + rawWithBoundary + currentSource.slice(range.end)
+
+    range.end = range.start + rawWithBoundary.length
+    sourceRef.current = nextSource
+    setSource(nextSource)
   }
 
   function endBlockEdit() {
@@ -292,7 +308,7 @@ export function App() {
                 block={block}
                 blockIndex={index}
                 isEditing={editingIndex === index}
-                key={`${index}-${block.start}-${block.type}`}
+                key={`${index}-${block.start}`}
                 mode={mode}
                 onBeginEdit={() => beginBlockEdit(block, index)}
                 onEndEdit={endBlockEdit}
@@ -358,15 +374,26 @@ const RenderedBlock = memo(function RenderedBlock({
   onPatch: (index: number, nextRaw: string) => void
 }) {
   const blockRef = useRef<HTMLElement | null>(null)
-  const [draft, setDraft] = useState(block.raw)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const [draft, setDraft] = useState(getEditableRaw(block.raw))
   const html = useMemo(() => renderMarkdownBlock(block.raw, mode), [block.hash, block.raw, mode])
-  const draftHtml = useMemo(() => renderMarkdownBlock(draft, mode), [draft, mode])
 
   useEffect(() => {
     if (!isEditing) {
-      setDraft(block.raw)
+      setDraft(getEditableRaw(block.raw))
     }
   }, [block.raw, isEditing])
+
+  useEffect(() => {
+    if (!isEditing) return
+
+    const input = inputRef.current
+    if (!input) return
+
+    resizeInput(input)
+    input.focus()
+    input.setSelectionRange(input.value.length, input.value.length)
+  }, [isEditing])
 
   useEffect(() => {
     const element = blockRef.current
@@ -395,7 +422,11 @@ const RenderedBlock = memo(function RenderedBlock({
     <section
       className={`ml-block ml-block-${block.type} ${isEditing ? 'is-editing-block' : ''}`}
       data-block-id={block.id}
-      onDoubleClick={onBeginEdit}
+      onClick={() => {
+        if (!isEditing) {
+          onBeginEdit()
+        }
+      }}
       ref={blockRef}
     >
       {isEditing ? (
@@ -403,12 +434,15 @@ const RenderedBlock = memo(function RenderedBlock({
           <textarea
             autoFocus
             className="block-editor-input"
+            ref={inputRef}
+            rows={1}
             spellCheck={false}
             value={draft}
             onBlur={onEndEdit}
             onChange={(event) => {
               const nextDraft = event.currentTarget.value
               setDraft(nextDraft)
+              resizeInput(event.currentTarget)
               onPatch(blockIndex, nextDraft)
             }}
             onKeyDown={(event) => {
@@ -417,23 +451,9 @@ const RenderedBlock = memo(function RenderedBlock({
               }
             }}
           />
-          <div
-            className="block-editor-preview"
-            dangerouslySetInnerHTML={{ __html: draftHtml }}
-          />
         </div>
       ) : (
-        <>
-          <button
-            aria-label="Edit block"
-            className="block-edit-button"
-            onClick={onBeginEdit}
-            type="button"
-          >
-            Edit
-          </button>
-          <div dangerouslySetInnerHTML={{ __html: html }} />
-        </>
+        <div dangerouslySetInnerHTML={{ __html: html }} />
       )}
     </section>
   )
@@ -467,4 +487,19 @@ function scheduleIdle(callback: () => void) {
 
   const id = globalThis.setTimeout(callback, 16)
   return () => globalThis.clearTimeout(id)
+}
+
+function resizeInput(input: HTMLTextAreaElement) {
+  input.style.height = 'auto'
+  input.style.height = `${input.scrollHeight}px`
+}
+
+function getBlockSuffix(raw: string) {
+  const match = /\n+$/.exec(raw)
+  return match?.[0] ?? '\n\n'
+}
+
+function getEditableRaw(raw: string) {
+  const suffix = getBlockSuffix(raw)
+  return raw.endsWith(suffix) ? raw.slice(0, -suffix.length) : raw
 }
