@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marklens-v2'
+const CACHE_NAME = 'marklens-v3'
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icon.svg']
 
 self.addEventListener('install', (event) => {
@@ -15,6 +15,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+  if (!event.request.url.startsWith('http://') && !event.request.url.startsWith('https://')) return
 
   if (event.request.mode === 'navigate') {
     event.respondWith(fetch(event.request).catch(() => caches.match('/')))
@@ -26,8 +27,14 @@ self.addEventListener('fetch', (event) => {
       return (
         cached ||
         fetch(event.request).then((response) => {
+          if (!response.ok) {
+            return response
+          }
+
           const copy = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {
+            // Extensions and browser internals can emit unsupported request schemes.
+          })
           return response
         })
       )

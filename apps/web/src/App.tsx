@@ -1,5 +1,7 @@
 import {
+  type CSSProperties,
   memo,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -46,6 +48,10 @@ export function App() {
   const [showOutline, setShowOutline] = useState(true)
   const [presentation, setPresentation] = useState(false)
   const [editorOpen, setEditorOpen] = useState(true)
+  const [editorWidth, setEditorWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('highlightmd:editorWidth'))
+    return Number.isFinite(saved) && saved >= 280 ? saved : 460
+  })
   const [fileName, setFileName] = useState('sample.md')
   const [renderLimit, setRenderLimit] = useState(initialRenderBlocks)
   const [blocks, setBlocks] = useState<DocBlock[]>([])
@@ -154,6 +160,10 @@ export function App() {
   }, [theme])
 
   useEffect(() => {
+    localStorage.setItem('highlightmd:editorWidth', String(Math.round(editorWidth)))
+  }, [editorWidth])
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setPresentation(false)
@@ -172,12 +182,6 @@ export function App() {
     file
       .text()
       .then((text) => {
-        if (text.length > maxAutosaveBytes) {
-          setEditorOpen(false)
-          if (editorRef.current) {
-            editorRef.current.value = ''
-          }
-        }
         setSource(text)
       })
       .catch(() => {
@@ -195,6 +199,27 @@ export function App() {
     anchor.download = `${fileName.replace(/\.md$/i, '') || 'highlightmd'}.html`
     anchor.click()
     URL.revokeObjectURL(href)
+  }
+
+  function startResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = editorWidth
+    const pointerId = event.pointerId
+    event.currentTarget.setPointerCapture(pointerId)
+
+    function handleMove(moveEvent: PointerEvent) {
+      const nextWidth = startWidth + moveEvent.clientX - startX
+      setEditorWidth(clamp(nextWidth, 300, Math.min(760, window.innerWidth - 560)))
+    }
+
+    function handleUp() {
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
   }
 
   return (
@@ -232,6 +257,30 @@ export function App() {
           ))}
         </div>
 
+        <div className="reader-controls">
+          <label>
+            <Type size={16} />
+            <input
+              max="24"
+              min="14"
+              type="range"
+              value={fontSize}
+              onChange={(event) => setFontSize(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            Line
+            <input
+              max="2.1"
+              min="1.35"
+              step="0.05"
+              type="range"
+              value={lineHeight}
+              onChange={(event) => setLineHeight(Number(event.target.value))}
+            />
+          </label>
+        </div>
+
         <div className="toolbar">
           <label className="icon-button" title="Open Markdown">
             <Upload size={18} />
@@ -259,7 +308,10 @@ export function App() {
         </div>
       </header>
 
-      <main className="workspace">
+      <main
+        className="workspace"
+        style={editorOpen ? ({ '--editor-width': `${editorWidth}px` } as CSSProperties) : undefined}
+      >
         {editorOpen && (
           <aside className="editor-pane">
             <textarea
@@ -275,31 +327,17 @@ export function App() {
           </aside>
         )}
 
-        <section className="reader-pane">
-          <div className="reader-controls">
-            <label>
-              <Type size={16} />
-              <input
-                max="24"
-                min="14"
-                type="range"
-                value={fontSize}
-                onChange={(event) => setFontSize(Number(event.target.value))}
-              />
-            </label>
-            <label>
-              Line
-              <input
-                max="2.1"
-                min="1.35"
-                step="0.05"
-                type="range"
-                value={lineHeight}
-                onChange={(event) => setLineHeight(Number(event.target.value))}
-              />
-            </label>
-          </div>
+        {editorOpen && (
+          <button
+            aria-label="Resize editor"
+            className="resize-handle"
+            onPointerDown={startResize}
+            title="Resize editor"
+            type="button"
+          />
+        )}
 
+        <section className="reader-pane">
           <article
             className="markdown-body markdown-reader"
             style={{ fontSize, lineHeight }}
@@ -419,4 +457,8 @@ function scheduleIdle(callback: () => void) {
 
   const id = globalThis.setTimeout(callback, 16)
   return () => globalThis.clearTimeout(id)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
 }
