@@ -1,6 +1,6 @@
-export const sampleMarkdown = `# MarkLens Web MVP
+export const sampleMarkdown = `# HightlightMD Web MVP
 
-MarkLens is a local-first Markdown reader for reviews, walkthroughs, and presentations.
+HightlightMD is a local-first Markdown reader for reviews, walkthroughs, and presentations.
 
 ## Conclusion
 
@@ -9,7 +9,7 @@ The first version should focus on Web / PWA. The core reason is that a web demo 
 ## Risks
 
 - Risk: large Markdown files can block the UI if the app parses and renders the entire document at once.
-- Trade-off: rule-based highlights are fast, but quality may vary across product and engineering documents.
+- Trade-off: local AI highlights are more useful, but model latency must stay out of the editing path.
 - Fallback: keep the original Markdown visible and make every highlight removable by mode.
 
 ## Action Items

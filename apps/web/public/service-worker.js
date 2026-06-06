@@ -1,5 +1,6 @@
-const CACHE_NAME = 'marklens-v3'
-const APP_SHELL = ['/', '/manifest.webmanifest', '/icon.svg']
+const CACHE_NAME = 'highlightmd-v1'
+const BASE = self.registration.scope
+const APP_SHELL = [BASE, `${BASE}manifest.webmanifest`, `${BASE}icon.svg`]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)))
@@ -18,7 +19,7 @@ self.addEventListener('fetch', (event) => {
   if (!event.request.url.startsWith('http://') && !event.request.url.startsWith('https://')) return
 
   if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request).catch(() => caches.match('/')))
+    event.respondWith(fetch(event.request).catch(() => caches.match(BASE)))
     return
   }
 

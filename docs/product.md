@@ -1,8 +1,8 @@
-# MarkLens Product Requirements
+# HightlightMD Product Requirements
 
 ## Product Overview
 
-MarkLens is a local-first Markdown reader for walkthroughs, document reviews, and fast scanning. It automatically highlights keywords, conclusions, risks, numbers, action items, and technical terms so Markdown documents become easier to explain, review, and present.
+HightlightMD is a local-first Markdown reader for walkthroughs, document reviews, and fast scanning. It automatically highlights keywords, conclusions, risks, numbers, action items, and technical terms so Markdown documents become easier to explain, review, and present.
 
 The first phase supports two product forms:
 
@@ -14,11 +14,11 @@ The first phase does not include Flutter, mobile apps, browser plugins, editor p
 ## Goals
 
 - Render Markdown with high performance.
-- Automatically surface important document content.
+- Use local AI to surface important document content.
 - Support review and presentation workflows.
 - Keep document processing local.
 - Reuse the web foundation for a future macOS app.
-- Leave room for optional local AI highlighting later.
+- Make highlight quality and scanning speed the core product experience.
 
 ## Target Users
 
@@ -35,8 +35,8 @@ The Web MVP must support:
 - Drag in Markdown files.
 - Render Markdown.
 - Highlight code blocks.
-- Automatically highlight important text.
-- Switch Light / Review / Pitch / Tech modes.
+- Use local AI to highlight important text.
+- Help users find key points at a glance.
 - Enter presentation mode.
 - Adjust reading style.
 - Process documents locally.
@@ -62,7 +62,7 @@ The Web MVP must support:
 - Users can drag in `.md` files.
 - Markdown renders quickly.
 - Code blocks render clearly.
-- Smart highlights appear automatically.
-- Users can switch four highlight modes.
+- Users can trigger local AI highlights.
+- AI highlights make key points easy to scan.
 - Users can enter presentation mode.
 - All document processing happens locally.

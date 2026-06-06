@@ -58,13 +58,15 @@ export function segmentMarkdown(source: string): DocBlock[] {
     }
 
     if (/^\s*(?:[-*+]\s+|\d+\.\s+)/.test(line)) {
-      ;({ index, offset } = consumeUntilBoundary(lines, index, offset))
+      index += 1
+      offset += line.length + 1
       pushBlock(blocks, normalized, startOffset, offset, 'list')
       continue
     }
 
     if (/^\s*>/.test(line)) {
-      ;({ index, offset } = consumeUntilBoundary(lines, index, offset))
+      index += 1
+      offset += line.length + 1
       pushBlock(blocks, normalized, startOffset, offset, 'blockquote')
       continue
     }
@@ -89,11 +91,63 @@ export function segmentMarkdown(source: string): DocBlock[] {
       continue
     }
 
-    ;({ index, offset } = consumeUntilBoundary(lines, index, offset))
+    index += 1
+    offset += line.length + 1
     pushBlock(blocks, normalized, startOffset, offset, 'paragraph')
   }
 
-  return blocks
+  return fillDocumentGaps(blocks, normalized)
+}
+
+function fillDocumentGaps(blocks: DocBlock[], source: string): DocBlock[] {
+  if (blocks.length === 0 && source.length > 0) {
+    return [
+      {
+        id: `b0-${hashString(source)}`,
+        type: 'paragraph',
+        start: 0,
+        end: source.length,
+        raw: source,
+        hash: hashString(source),
+      },
+    ]
+  }
+
+  const filled: DocBlock[] = []
+  let cursor = 0
+  let gapIndex = 0
+
+  for (const block of blocks) {
+    if (block.start > cursor) {
+      const raw = source.slice(cursor, block.start)
+      filled.push({
+        id: `gap${gapIndex}-${hashString(raw)}`,
+        type: 'paragraph',
+        start: cursor,
+        end: block.start,
+        raw,
+        hash: hashString(raw),
+      })
+      gapIndex += 1
+    }
+
+    filled.push(block)
+    cursor = block.end
+  }
+
+  if (cursor < source.length) {
+    const raw = source.slice(cursor)
+    filled.push({
+      id: `gap${gapIndex}-${hashString(raw)}`,
+      type: 'paragraph',
+      start: cursor,
+      end: source.length,
+      raw,
+      hash: hashString(raw),
+    })
+  }
+
+  return filled
 }
 
 function consumeUntilBoundary(lines: string[], index: number, offset: number) {
@@ -143,7 +197,7 @@ function pushBlock(
   })
 }
 
-function hashString(value: string) {
+export function hashString(value: string) {
   let hash = 2166136261
 
   for (let index = 0; index < value.length; index += 1) {

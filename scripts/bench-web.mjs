@@ -74,7 +74,7 @@ export interface BenchmarkBlock {
 
 `
 
-  let output = '# MarkLens Benchmark\n\n'
+  let output = '# HightlightMD Benchmark\n\n'
 
   while (output.length < targetBytes) {
     output += section

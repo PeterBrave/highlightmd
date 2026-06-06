@@ -13,6 +13,7 @@ import yaml from 'highlight.js/lib/languages/yaml'
 import { marked } from 'marked'
 import type { HighlightMode } from '@highlightmd/core'
 import { highlightHtml } from './highlight'
+import type { AiHighlight } from './ollama'
 
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('sh', bash)
@@ -33,24 +34,43 @@ hljs.registerLanguage('yml', yaml)
 
 marked.use({
   gfm: true,
-  breaks: false,
+  breaks: true,
+  renderer: {
+    heading(text, level) {
+      const id = text
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '-')
+        .replace(/^-|-$/g, '')
+      return `<h${level} id="${id}">${text}</h${level}>`
+    },
+  },
 })
 
-export function renderMarkdown(source: string, mode: HighlightMode) {
+export function renderMarkdown(
+  source: string,
+  mode: HighlightMode | AiHighlight[],
+  aiHighlights: AiHighlight[] = [],
+) {
+  const highlights = Array.isArray(mode) ? mode : aiHighlights
   const html = marked.parse(source, { async: false }) as string
 
   const safeHtml = DOMPurify.sanitize(html, {
-    ADD_ATTR: ['target'],
+    ADD_ATTR: ['target', 'id'],
   })
 
-  return highlightHtml(highlightCodeBlocks(safeHtml), mode)
+  return highlightHtml(highlightCodeBlocks(safeHtml), highlights)
 }
 
 const blockCache = new Map<string, string>()
 const blockCacheLimit = 1200
 
-export function renderMarkdownBlock(source: string, mode: HighlightMode) {
-  const key = `${mode}:${hashString(source)}`
+export function renderMarkdownBlock(
+  source: string,
+  mode: HighlightMode | AiHighlight[],
+  aiHighlights: AiHighlight[] = [],
+) {
+  const highlights = Array.isArray(mode) ? mode : aiHighlights
+  const key = `${hashString(source)}:${hashAiHighlights(highlights)}`
   const cached = blockCache.get(key)
 
   if (cached) {
@@ -59,9 +79,9 @@ export function renderMarkdownBlock(source: string, mode: HighlightMode) {
 
   const html = marked.parse(trimLargeCodeBlock(source), { async: false }) as string
   const safeHtml = DOMPurify.sanitize(html, {
-    ADD_ATTR: ['target'],
+    ADD_ATTR: ['target', 'id'],
   })
-  const highlighted = highlightHtml(safeHtml, mode)
+  const highlighted = highlightHtml(safeHtml, highlights)
 
   blockCache.set(key, highlighted)
   if (blockCache.size > blockCacheLimit) {
@@ -92,7 +112,7 @@ export function highlightCodeBlocksIn(root: ParentNode) {
   })
 }
 
-export function exportHtmlDocument(renderedHtml: string, title = 'HighlightMD Export') {
+export function exportHtmlDocument(renderedHtml: string, title = 'HightlightMD Export') {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -128,6 +148,11 @@ function escapeHtml(value: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
+}
+
+function hashAiHighlights(highlights: AiHighlight[]) {
+  if (highlights.length === 0) return 'no-ai'
+  return hashString(highlights.map((highlight) => `${highlight.kind}:${highlight.text}`).join('|'))
 }
 
 function highlightCodeBlocks(html: string) {

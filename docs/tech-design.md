@@ -1,8 +1,8 @@
-# MarkLens Technical Design
+# HightlightMD Technical Design
 
 ## Technical Direction
 
-MarkLens is a web-first, TypeScript-first, local-first Markdown review reader.
+HightlightMD is a web-first, TypeScript-first, local-first Markdown review reader.
 
 The recommended first-stage stack is:
 
@@ -10,7 +10,7 @@ The recommended first-stage stack is:
 - React
 - Vite
 - Markdown AST / renderer pipeline
-- Rule-based highlight engine
+- Local AI highlight engine through Ollama
 - Web Worker pipeline in later iterations
 - Tauri for the future macOS app
 
@@ -50,14 +50,16 @@ The first Web MVP uses a simpler in-browser renderer so the product can be exerc
 
 ## Shared Types
 
-The core package defines shared document block, highlight, highlight mode, and block state types. These types are intended to be reused by the web app, future worker package, and future Tauri app.
+The core package defines shared document block, highlight, and block state types. These types are intended to be reused by the web app, future worker package, and future Tauri app.
 
-## Highlight Modes
+## AI Highlight Experience
 
-- Light: sparse highlights for normal reading.
-- Review: risks, action items, numbers, dependencies, and decisions.
-- Pitch: conclusions, value, action items, and important numbers.
-- Tech: APIs, modules, paths, configuration, performance, security, and architecture terms.
+The highlight experience should optimize for one goal: help users find key points at a glance.
+
+- Use local Ollama models for private document analysis.
+- Ask the model for exact source text spans so rendering stays deterministic.
+- Keep AI analysis manually triggered in the MVP to protect editing speed.
+- Cache AI results and clear them after edits to avoid stale highlights.
 
 ## Local-first Requirements
 
@@ -70,7 +72,7 @@ The core package defines shared document block, highlight, highlight mode, and b
 ## Next Technical Steps
 
 - Add block segmentation.
-- Move highlight analysis into a Web Worker.
+- Move AI highlight orchestration into a Web Worker.
 - Add Shiki for real syntax highlighting.
 - Add virtual rendering for long documents.
 - Add benchmark fixtures for 100KB, 1MB, 5MB, and 10MB Markdown files.

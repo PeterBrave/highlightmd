@@ -1,149 +1,239 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Focus,
   Moon,
+  PanelLeft,
   PanelRight,
   Presentation,
+  Settings2,
+  Sparkles,
   Sun,
-  Type,
   Upload,
 } from 'lucide-react'
-import type { DocBlock, HighlightMode } from '@highlightmd/core'
-import { segmentMarkdown } from './lib/blocks'
-import { exportHtmlDocument, highlightCodeBlocksIn, renderMarkdownBlock } from './lib/markdown'
+import { BlockEditor, type BlockEditorHandle, type HeadingItem } from './components/BlockEditor'
+import { AiSettingsModal } from './components/AiSettingsModal'
+import { TutorialModal } from './components/TutorialModal'
+import {
+  clearAiHighlightCache,
+  loadAiHighlightCache,
+  saveAiHighlightCache,
+} from './lib/aiHighlightCache'
+import { scrollToHighlight } from './lib/editorHighlights'
+import { buildHighlightSummary } from './lib/keyPointSummary'
+import {
+  analyzeMarkdownWithOllama,
+  defaultAiSettings,
+  mergeAiSettings,
+  testOllamaConnection,
+  fetchOllamaModels,
+  extractionLevelLimits,
+  synthesizeHighlightSummary,
+  type AiHighlight,
+  type AiSettings,
+  type ExtractionLevel,
+  highlightRetryAttempts,
+  summaryRetryAttempts,
+} from './lib/ollama'
 import { sampleMarkdown } from './lib/sample'
 
 type Theme = 'light' | 'dark'
 
-const modeLabels: Record<HighlightMode, string> = {
-  light: 'Light',
-  review: 'Review',
-  pitch: 'Pitch',
-  tech: 'Tech',
+const defaultSource = localStorage.getItem('highlightmd:source') ?? sampleMarkdown
+const initialHighlightCache = loadAiHighlightCache(defaultSource)
+const aiSettingsStorageKey = 'highlightmd:ai-settings'
+const tutorialSeenStorageKey = 'highlightmd:tutorial-seen'
+const extractionLevels: ExtractionLevel[] = ['low', 'medium', 'high']
+const maxAutosaveBytes = 512 * 1024
+const autosaveDebounceMs = 800
+const kindOrder = ['risk', 'decision', 'action', 'keyword', 'number', 'tech'] as const
+const kindLabels: Record<(typeof kindOrder)[number], string> = {
+  risk: 'Risks',
+  decision: 'Decisions',
+  action: 'Actions',
+  keyword: 'Keywords',
+  number: 'Numbers',
+  tech: 'Technical',
 }
 
-const defaultSource = localStorage.getItem('highlightmd:source') ?? sampleMarkdown
-const initialRenderBlocks = 24
-const renderBatchSize = 180
-const maxAutosaveBytes = 512 * 1024
+type AiStatus = 'idle' | 'testing' | 'connected' | 'analyzing' | 'done' | 'error'
+type AiSummaryStatus = 'idle' | 'summarizing' | 'done' | 'fallback'
+
+interface AiProgress {
+  completed: number
+  total: number
+}
 
 export function App() {
-  const [source, setSource] = useState(defaultSource)
-  const [mode, setMode] = useState<HighlightMode>('review')
   const [theme, setTheme] = useState<Theme>('light')
-  const [fontSize, setFontSize] = useState(17)
-  const [lineHeight, setLineHeight] = useState(1.7)
   const [showOutline, setShowOutline] = useState(true)
+  const [showAiSettings, setShowAiSettings] = useState(false)
+  const [showTutorial, setShowTutorial] = useState(
+    () => !localStorage.getItem(tutorialSeenStorageKey),
+  )
+  const [showKeyPoints, setShowKeyPoints] = useState(false)
   const [presentation, setPresentation] = useState(false)
-  const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [fileName, setFileName] = useState('sample.md')
-  const [renderLimit, setRenderLimit] = useState(initialRenderBlocks)
-  const [blocks, setBlocks] = useState<DocBlock[]>([])
-  const [segmentationMs, setSegmentationMs] = useState<number | null>(null)
-  const workerRef = useRef<Worker | null>(null)
-  const requestIdRef = useRef(0)
-  const sourceRef = useRef(source)
-  const editRangeRef = useRef<{
-    index: number
-    start: number
-    end: number
-    suffix: string
-  } | null>(null)
+  const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings())
+  const [aiHighlights, setAiHighlights] = useState<AiHighlight[]>(
+    () => initialHighlightCache?.highlights ?? [],
+  )
+  const [aiSummary, setAiSummary] = useState(initialHighlightCache?.summary ?? '')
+  const [aiSummaryStatus, setAiSummaryStatus] = useState<AiSummaryStatus>(
+    () => (initialHighlightCache?.summary ? 'done' : 'idle'),
+  )
+  const [aiStatus, setAiStatus] = useState<AiStatus>(
+    () => (initialHighlightCache ? 'done' : 'idle'),
+  )
+  const [aiMessage, setAiMessage] = useState(
+    initialHighlightCache
+      ? `Restored ${initialHighlightCache.highlights.length} cached highlights`
+      : 'Local AI ready',
+  )
+  const [aiProgress, setAiProgress] = useState<AiProgress>({ completed: 0, total: 0 })
+  const [headings, setHeadings] = useState<HeadingItem[]>([])
+  const [collapsedHeadings, setCollapsedHeadings] = useState<Set<string>>(new Set())
+  const [collapsedKinds, setCollapsedKinds] = useState<Set<string>>(new Set())
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null)
+  const [activeKeyPointId, setActiveKeyPointId] = useState<string | null>(null)
+  const [availableModels, setAvailableModels] = useState<string[]>([])
 
-  const visibleBlocks = useMemo(() => blocks.slice(0, renderLimit), [blocks, renderLimit])
-  const outline = useMemo(() => extractOutline(blocks), [blocks])
-  const isRendering = renderLimit < blocks.length
+  const editorHandleRef = useRef<BlockEditorHandle | null>(null)
+  const aiRequestIdRef = useRef(0)
+  const autosaveTimerRef = useRef<number | undefined>(undefined)
+  const sourceRef = useRef(defaultSource)
 
   useEffect(() => {
-    if (!('Worker' in window)) return
+    if (showAiSettings) {
+      fetchOllamaModels(aiSettings.endpoint).then(setAvailableModels)
+    }
+  }, [showAiSettings, aiSettings.endpoint])
 
-    const worker = new Worker(new URL('./workers/markdownWorker.ts', import.meta.url), {
-      type: 'module',
+  const outlineWithVisibility = useMemo(() => {
+    const result: Array<HeadingItem & { hasChildren: boolean; isHidden: boolean; key: string }> = []
+    let hideLevel = Infinity
+
+    for (let i = 0; i < headings.length; i++) {
+      const item = headings[i]
+      const hasChildren = i < headings.length - 1 && headings[i + 1].level > item.level
+      const key = `${item.id}-${i}`
+
+      if (item.level <= hideLevel) {
+        hideLevel = Infinity
+      }
+
+      const isHidden = hideLevel < item.level
+
+      if (!isHidden && collapsedHeadings.has(key)) {
+        hideLevel = Math.min(hideLevel, item.level)
+      }
+
+      result.push({ ...item, hasChildren, isHidden, key })
+    }
+
+    return result.filter((item) => !item.isHidden)
+  }, [headings, collapsedHeadings])
+
+  const handleOutlineClick = (item: HeadingItem & { key: string }, e: React.MouseEvent) => {
+    e.preventDefault()
+    setActiveHeadingId(item.id)
+
+    const el = document.querySelector(`[data-id="${item.blockId}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+
+  const toggleHeading = (key: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCollapsedHeadings((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
     })
+  }
 
-    worker.onmessage = (
-      event: MessageEvent<{ id: number; blocks: DocBlock[]; durationMs: number }>,
-    ) => {
-      if (event.data.id !== requestIdRef.current) return
-      setBlocks(event.data.blocks)
-      setSegmentationMs(event.data.durationMs)
+  const toggleKindGroup = (key: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCollapsedKinds((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const handleKeyPointClick = (highlight: AiHighlight, itemKey: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    setActiveKeyPointId(itemKey)
+    const root = editorHandleRef.current?.getEditorRoot()
+    if (root) {
+      scrollToHighlight(root, highlight.text)
     }
+  }
 
-    workerRef.current = worker
+  const handleEditorReady = useCallback(async (handle: BlockEditorHandle) => {
+    editorHandleRef.current = handle
+    setHeadings(handle.getHeadings())
 
-    return () => {
-      worker.terminate()
-      workerRef.current = null
-    }
+    const markdown = await handle.getMarkdown()
+    sourceRef.current = markdown
+    const cached = loadAiHighlightCache(markdown)
+    if (!cached) return
+
+    handle.setAiHighlights(cached.highlights)
+    setAiHighlights(cached.highlights)
+    setAiSummary(cached.summary)
+    setAiSummaryStatus('done')
+    setAiStatus('done')
+    setAiMessage(`Restored ${cached.highlights.length} cached highlights`)
+    setShowKeyPoints(true)
   }, [])
 
-  useEffect(() => {
-    sourceRef.current = source
-    const id = requestIdRef.current + 1
-    requestIdRef.current = id
-    setSegmentationMs(null)
+  const handleEditorChange = useCallback(() => {
+    const handle = editorHandleRef.current
+    if (!handle) return
 
-    const worker = workerRef.current
-    if (worker) {
-      worker.postMessage({ id, source })
-      return
+    setHeadings(handle.getHeadings())
+
+    if (aiHighlights.length > 0) {
+      handle.setAiHighlights([])
+      setAiHighlights([])
+      setAiSummary('')
+      clearAiHighlightCache()
+      setAiSummaryStatus('idle')
+      setAiStatus('idle')
+      setAiProgress({ completed: 0, total: 0 })
+      setAiMessage('AI highlights cleared after edit')
     }
 
-    const timeoutId = globalThis.setTimeout(() => {
-      const startedAt = performance.now()
-      const nextBlocks = segmentMarkdown(source)
-      if (id !== requestIdRef.current) return
-      setBlocks(nextBlocks)
-      setSegmentationMs(performance.now() - startedAt)
-    }, 0)
-
-    return () => globalThis.clearTimeout(timeoutId)
-  }, [source])
-
-  useEffect(() => {
-    const id = window.setTimeout(() => {
-      if (source.length <= maxAutosaveBytes) {
-        localStorage.setItem('highlightmd:source', source)
+    if (autosaveTimerRef.current !== undefined) {
+      window.clearTimeout(autosaveTimerRef.current)
+    }
+    autosaveTimerRef.current = window.setTimeout(async () => {
+      const md = await handle.getMarkdown()
+      sourceRef.current = md
+      if (md.length <= maxAutosaveBytes) {
+        localStorage.setItem('highlightmd:source', md)
       }
-    }, 350)
-
-    return () => window.clearTimeout(id)
-  }, [source])
-
-  useEffect(() => {
-    let cancelled = false
-    let currentLimit = Math.min(initialRenderBlocks, blocks.length)
-
-    setRenderLimit(currentLimit)
-
-    function pump() {
-      if (cancelled || currentLimit >= blocks.length) return
-
-      currentLimit = Math.min(currentLimit + renderBatchSize, blocks.length)
-      setRenderLimit(currentLimit)
-
-      if (currentLimit < blocks.length) {
-        scheduleIdle(pump)
-      }
-    }
-
-    let startupId: number | undefined
-    if (currentLimit < blocks.length) {
-      startupId = window.setTimeout(() => scheduleIdle(pump), 120)
-    }
-
-    return () => {
-      cancelled = true
-      if (startupId !== undefined) {
-        window.clearTimeout(startupId)
-      }
-    }
-  }, [blocks])
+    }, autosaveDebounceMs)
+  }, [aiHighlights.length])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem(aiSettingsStorageKey, JSON.stringify(aiSettings))
+  }, [aiSettings])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -151,76 +241,220 @@ export function App() {
         setPresentation(false)
       }
     }
-
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  function handleFiles(files: FileList | null) {
+  const keyPoints = useMemo(
+    () => aiHighlights.slice(0, extractionLevelLimits[aiSettings.extractionLevel]),
+    [aiHighlights, aiSettings.extractionLevel],
+  )
+  const prevKeyPointsLengthRef = useRef(0)
+
+  useEffect(() => {
+    const previousLength = prevKeyPointsLengthRef.current
+    if (keyPoints.length > 0 && previousLength === 0) {
+      setShowKeyPoints(true)
+    } else if (keyPoints.length === 0 && aiStatus !== 'analyzing') {
+      setShowKeyPoints(false)
+    }
+    prevKeyPointsLengthRef.current = keyPoints.length
+  }, [keyPoints.length, aiStatus])
+
+  const keyPointGroups = useMemo(() => {
+    const groups = new Map<string, AiHighlight[]>()
+    for (const kind of kindOrder) {
+      const items = keyPoints.filter((item) => item.kind === kind)
+      if (items.length > 0) groups.set(kind, items)
+    }
+    for (const item of keyPoints) {
+      if (kindOrder.includes(item.kind as (typeof kindOrder)[number])) continue
+      const bucket = groups.get(item.kind) ?? []
+      bucket.push(item)
+      groups.set(item.kind, bucket)
+    }
+    return Array.from(groups.entries()).map(([kind, items]) => ({
+      kind,
+      label: kindLabels[kind as (typeof kindOrder)[number]] ?? kind,
+      items,
+      key: `kind-${kind}`,
+    }))
+  }, [keyPoints])
+
+  const keyPointGroupsWithVisibility = useMemo(() => {
+    return keyPointGroups.map((group) => ({
+      ...group,
+      isCollapsed: collapsedKinds.has(group.key),
+    }))
+  }, [keyPointGroups, collapsedKinds])
+
+  const hasKeyPointsContent = keyPoints.length > 0 || aiStatus === 'analyzing'
+  const workspaceStyle = useMemo(
+    () => ({
+      gridTemplateColumns: `${showOutline ? 'var(--side-pane-width)' : '0px'} minmax(0, 1fr) ${
+        showKeyPoints && hasKeyPointsContent ? 'var(--key-points-pane-width)' : '0px'
+      }`,
+    }),
+    [showOutline, showKeyPoints, hasKeyPointsContent],
+  )
+
+  async function handleFiles(files: FileList | null) {
     const file = files?.[0]
     if (!file) return
 
     setFileName(file.name)
-    file
-      .text()
-      .then((text) => {
-        setSource(text)
-      })
-      .catch(() => {
-        setSource('Unable to read this file.')
-      })
+    try {
+      const text = await file.text()
+      sourceRef.current = text
+      const cached = loadAiHighlightCache(text)
+      setAiHighlights(cached?.highlights ?? [])
+      setAiSummary(cached?.summary ?? '')
+      setAiSummaryStatus(cached?.summary ? 'done' : 'idle')
+      setAiProgress({ completed: 0, total: 0 })
+      setAiStatus(cached ? 'done' : 'idle')
+      setAiMessage(
+        cached
+          ? `Restored ${cached.highlights.length} cached highlights`
+          : 'Local AI ready',
+      )
+      await editorHandleRef.current?.setMarkdown(text)
+      editorHandleRef.current?.setAiHighlights(cached?.highlights ?? [])
+      setHeadings(editorHandleRef.current?.getHeadings() ?? [])
+      if (cached) setShowKeyPoints(true)
+    } catch {
+      sourceRef.current = 'Unable to read this file.'
+    }
   }
 
-  function handleExport() {
-    const renderedHtml = blocks.map((block) => renderMarkdownBlock(block.raw, mode)).join('\n')
-    const doc = exportHtmlDocument(renderedHtml, fileName.replace(/\.md$/i, ''))
-    const blob = new Blob([doc], { type: 'text/html;charset=utf-8' })
+  async function handleExport() {
+    const handle = editorHandleRef.current
+    if (!handle) return
+
+    const md = await handle.getMarkdown()
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
     const href = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = href
-    anchor.download = `${fileName.replace(/\.md$/i, '') || 'highlightmd'}.html`
+    anchor.download = fileName.endsWith('.md') ? fileName : `${fileName}.md`
     anchor.click()
     URL.revokeObjectURL(href)
   }
 
-  function beginBlockEdit(block: DocBlock, index: number) {
-    editRangeRef.current = {
-      index,
-      start: block.start,
-      end: block.end,
-      suffix: getBlockSuffix(block.raw),
+  function closeTutorial() {
+    localStorage.setItem(tutorialSeenStorageKey, '1')
+    setShowTutorial(false)
+  }
+
+  async function handleTestAiConnection() {
+    setAiStatus('testing')
+    setAiMessage('Testing Ollama...')
+
+    try {
+      const result = await testOllamaConnection(aiSettings)
+      setAiStatus('connected')
+      setAiMessage(
+        result.hasConfiguredModel
+          ? `Connected to ${aiSettings.model}`
+          : `Connected. Model not listed: ${aiSettings.model}`,
+      )
+    } catch (error) {
+      setAiStatus('error')
+      setAiMessage(getErrorMessage(error))
     }
-    setEditingIndex(index)
   }
 
-  function patchEditingBlock(index: number, nextRaw: string) {
-    const range = editRangeRef.current
-    if (!range || range.index !== index) return
+  async function handleAiHighlight() {
+    if (!aiSettings.enabled) {
+      setAiStatus('idle')
+      setAiMessage('Enable local AI in settings first')
+      setShowAiSettings(true)
+      return
+    }
 
-    const currentSource = sourceRef.current
-    const rawWithBoundary = nextRaw.endsWith(range.suffix)
-      ? nextRaw
-      : `${nextRaw}${range.suffix}`
-    const nextSource =
-      currentSource.slice(0, range.start) + rawWithBoundary + currentSource.slice(range.end)
+    const handle = editorHandleRef.current
+    if (!handle) return
 
-    range.end = range.start + rawWithBoundary.length
-    sourceRef.current = nextSource
-    setSource(nextSource)
-  }
+    const source = await handle.getMarkdown()
+    const id = aiRequestIdRef.current + 1
+    aiRequestIdRef.current = id
+    setAiStatus('analyzing')
+    setAiHighlights([])
+    setAiSummary('')
+    setAiSummaryStatus('idle')
+    setAiProgress({ completed: 0, total: 1 })
+    setAiMessage('Starting quick AI scan...')
+    setShowKeyPoints(true)
 
-  function endBlockEdit() {
-    editRangeRef.current = null
-    setEditingIndex(null)
+    try {
+      const startedAt = performance.now()
+      const highlights = await analyzeMarkdownWithOllama(source, aiSettings, {
+        maxHighlights: extractionLevelLimits[aiSettings.extractionLevel],
+        onProgress: (progress) => {
+          if (id !== aiRequestIdRef.current) return
+          const nextHighlights = progress.highlights
+          setAiHighlights(nextHighlights)
+          setAiSummary(buildHighlightSummary(nextHighlights))
+          setAiProgress({
+            completed: progress.completedChunks,
+            total: progress.totalChunks,
+          })
+          setAiMessage(
+            progress.totalChunks === 0
+              ? 'Preparing AI scan...'
+              : `AI chunk ${progress.completedChunks}/${progress.totalChunks} · ${progress.highlights.length} highlights`,
+          )
+        },
+      })
+      if (id !== aiRequestIdRef.current) return
+
+      setAiHighlights(highlights)
+      const fallbackSummary = buildHighlightSummary(highlights)
+      setAiSummary(fallbackSummary)
+      saveAiHighlightCache(source, highlights, fallbackSummary)
+      setAiStatus('done')
+      setAiProgress((progress) => ({
+        completed: progress.total,
+        total: progress.total,
+      }))
+
+      if (highlights.length > 0) {
+        setAiSummaryStatus('summarizing')
+        setAiMessage('Highlights ready · synthesizing summary...')
+
+        const summary = await synthesizeHighlightSummary(highlights, aiSettings)
+        if (id !== aiRequestIdRef.current) return
+
+        if (summary) {
+          setAiSummary(summary)
+          setAiSummaryStatus('done')
+          saveAiHighlightCache(source, highlights, summary)
+          setAiMessage(
+            `AI highlighted ${highlights.length} items · summary ready in ${Math.round(performance.now() - startedAt)}ms`,
+          )
+        } else {
+          setAiSummary(fallbackSummary)
+          setAiSummaryStatus('fallback')
+          setAiMessage(
+            `Highlights ready · summary fallback after ${summaryRetryAttempts} attempts`,
+          )
+        }
+      } else {
+        setAiSummaryStatus('idle')
+        setAiMessage(
+          `No highlights parsed — retried up to ${highlightRetryAttempts}x per chunk. Check model output format in Settings.`,
+        )
+      }
+    } catch (error) {
+      if (id !== aiRequestIdRef.current) return
+      setAiStatus('error')
+      setAiProgress({ completed: 0, total: 0 })
+      setAiMessage(getErrorMessage(error))
+    }
   }
 
   return (
     <div
-      className={[
-        'app-shell',
-        presentation ? 'is-presentation' : '',
-        'reader-only',
-      ].join(' ')}
+      className={['app-shell', presentation ? 'is-presentation' : '', 'has-block-editor'].join(' ')}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault()
@@ -229,48 +463,14 @@ export function App() {
     >
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">M</span>
+          <span className="brand-mark">H</span>
           <div>
-            <strong>MarkLens</strong>
-            <span>{fileName}</span>
+            <strong>HightlightMD</strong>
+            <span>
+              <CheckCircle2 size={13} />
+              {fileName}
+            </span>
           </div>
-        </div>
-
-        <div className="segmented" aria-label="Highlight mode">
-          {(Object.keys(modeLabels) as HighlightMode[]).map((key) => (
-            <button
-              key={key}
-              className={mode === key ? 'active' : ''}
-              onClick={() => setMode(key)}
-              type="button"
-            >
-              {modeLabels[key]}
-            </button>
-          ))}
-        </div>
-
-        <div className="reader-controls">
-          <label>
-            <Type size={16} />
-            <input
-              max="24"
-              min="14"
-              type="range"
-              value={fontSize}
-              onChange={(event) => setFontSize(Number(event.target.value))}
-            />
-          </label>
-          <label>
-            Line
-            <input
-              max="2.1"
-              min="1.35"
-              step="0.05"
-              type="range"
-              value={lineHeight}
-              onChange={(event) => setLineHeight(Number(event.target.value))}
-            />
-          </label>
         </div>
 
         <div className="toolbar">
@@ -282,13 +482,36 @@ export function App() {
               onChange={(event) => handleFiles(event.target.files)}
             />
           </label>
-          <button title="Toggle outline" type="button" onClick={() => setShowOutline((v) => !v)}>
-            <PanelRight size={18} />
-          </button>
           <button title="Presentation mode" type="button" onClick={() => setPresentation((v) => !v)}>
             {presentation ? <Focus size={18} /> : <Presentation size={18} />}
           </button>
-          <button title="Export HTML" type="button" onClick={handleExport}>
+          <button
+            className={`ai-highlight-button ${aiStatus === 'analyzing' ? 'is-loading' : ''}`}
+            disabled={aiStatus === 'analyzing'}
+            title="AI Highlight"
+            type="button"
+            onClick={handleAiHighlight}
+          >
+            <Sparkles size={17} />
+            <span>{aiStatus === 'analyzing' ? 'Scanning' : 'AI Highlight'}</span>
+          </button>
+          <button
+            className={showAiSettings ? 'active' : ''}
+            title="AI settings"
+            type="button"
+            onClick={() => setShowAiSettings((value) => !value)}
+          >
+            <Settings2 size={18} />
+          </button>
+          <button
+            className={showTutorial ? 'active' : ''}
+            title="使用教程"
+            type="button"
+            onClick={() => setShowTutorial(true)}
+          >
+            <BookOpen size={18} />
+          </button>
+          <button title="Export Markdown" type="button" onClick={handleExport}>
             <Download size={18} />
           </button>
           <button title="Theme" type="button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
@@ -297,209 +520,245 @@ export function App() {
         </div>
       </header>
 
-      <main className="workspace">
-        <section className="reader-pane">
-          <article
-            className="markdown-body markdown-reader"
-            style={{ fontSize, lineHeight }}
-          >
-            {visibleBlocks.map((block, index) => (
-              <RenderedBlock
-                block={block}
-                blockIndex={index}
-                isEditing={editingIndex === index}
-                key={`${index}-${block.start}`}
-                mode={mode}
-                onBeginEdit={() => beginBlockEdit(block, index)}
-                onEndEdit={endBlockEdit}
-                onPatch={patchEditingBlock}
-              />
-            ))}
-            {isRendering && (
-              <div className="render-progress" aria-live="polite">
-                Rendering {Math.min(renderLimit, blocks.length).toLocaleString()} /{' '}
-                {blocks.length.toLocaleString()} blocks
+      {showTutorial ? <TutorialModal onClose={closeTutorial} /> : null}
+
+      {showAiSettings ? (
+        <AiSettingsModal
+          aiMessage={aiMessage}
+          aiSettings={aiSettings}
+          aiStatus={aiStatus}
+          availableModels={availableModels}
+          extractionLevels={extractionLevels}
+          onClose={() => setShowAiSettings(false)}
+          onRunHighlight={handleAiHighlight}
+          onSettingsChange={setAiSettings}
+          onTestConnection={handleTestAiConnection}
+        />
+      ) : null}
+
+      <main className="workspace" style={workspaceStyle}>
+        <div className={`workspace-side workspace-side-left ${showOutline ? 'is-open' : 'is-collapsed'}`}>
+          {showOutline ? (
+            <aside className="outline-pane left-pane">
+              <div className="outline-header">
+                <strong>Outline</strong>
+                <button type="button" onClick={() => setShowOutline(false)} title="收起目录">
+                  <ChevronLeft size={16} />
+                </button>
+              </div>
+              {outlineWithVisibility.length > 0 ? (
+                <div className="outline-tree">
+                  {outlineWithVisibility.map((item) => (
+                    <a
+                      href={`#${item.id}`}
+                      key={item.key}
+                      className={`outline-item ${activeHeadingId === item.id ? 'active' : ''}`}
+                      style={{ paddingLeft: (item.level - 1) * 16 + 6 }}
+                      onClick={(e) => handleOutlineClick(item, e)}
+                    >
+                      {item.hasChildren ? (
+                        <button
+                          className="outline-toggle"
+                          type="button"
+                          onClick={(e) => toggleHeading(item.key, e)}
+                        >
+                          {collapsedHeadings.has(item.key) ? (
+                            <ChevronRight size={14} />
+                          ) : (
+                            <ChevronDown size={14} />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="outline-spacer" />
+                      )}
+                      <span className="outline-text">{item.text}</span>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <span className="empty-outline">No headings</span>
+              )}
+            </aside>
+          ) : (
+            <button
+              className="outline-floating-tab"
+              type="button"
+              onClick={() => setShowOutline(true)}
+              title="展开目录"
+            >
+              <PanelLeft size={16} />
+            </button>
+          )}
+        </div>
+
+        <section className="editor-pane" aria-label="Document editor">
+          <div className="editor-container">
+            <BlockEditor
+              aiHighlights={aiHighlights}
+              initialMarkdown={defaultSource}
+              theme={theme}
+              onChange={handleEditorChange}
+              onReady={handleEditorReady}
+            />
+
+            {aiStatus === 'analyzing' && aiProgress.total > 0 && (
+              <div className="ai-progress" aria-live="polite">
+                <div className="ai-progress-header">
+                  <div className="ai-progress-title">
+                    <span className="ai-spinner" />
+                    <strong>AI scanning key points</strong>
+                  </div>
+                  <span>
+                    Chunk {aiProgress.completed} / {aiProgress.total} ·{' '}
+                    {aiHighlights.length} highlights ready
+                  </span>
+                </div>
+                <div
+                  className={`ai-progress-track ${
+                    aiProgress.completed === 0 ? 'is-indeterminate' : ''
+                  }`}
+                >
+                  <span
+                    style={{
+                      width: `${Math.max(
+                        8,
+                        Math.round((aiProgress.completed / aiProgress.total) * 100),
+                      )}%`,
+                    }}
+                  />
+                </div>
               </div>
             )}
-            {blocks.length === 0 && (
-              <div className="render-progress" aria-live="polite">
-                Preparing document...
-              </div>
-            )}
-          </article>
+          </div>
         </section>
 
-        {showOutline && (
-          <aside className="outline-pane">
-            {segmentationMs !== null && (
-              <span className="outline-meta">
-                {blocks.length.toLocaleString()} blocks · {Math.round(segmentationMs)}ms
+        <div
+          className={`workspace-side workspace-side-right ${
+            showKeyPoints && hasKeyPointsContent ? 'is-open' : 'is-collapsed'
+          }`}
+        >
+          {showKeyPoints && hasKeyPointsContent ? (
+            <aside className="key-points-pane right-pane" aria-label="AI key points">
+              <div className="key-points-header">
+                <strong>Key Points</strong>
+                <button type="button" onClick={() => setShowKeyPoints(false)} title="收起要点">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+              <span className="key-points-meta">
+                {aiStatus === 'analyzing'
+                  ? `${aiProgress.completed}/${aiProgress.total || 1} scanning`
+                  : aiSummaryStatus === 'summarizing'
+                    ? 'Synthesizing summary...'
+                    : `${keyPoints.length}/${extractionLevelLimits[aiSettings.extractionLevel]} highlights`}
               </span>
-            )}
-            {outline.length > 0 ? (
-              outline.map((item) => (
-                <a
-                  href={`#${item.id}`}
-                  key={`${item.id}-${item.text}`}
-                  style={{ paddingLeft: (item.level - 1) * 12 }}
-                >
-                  {item.text}
-                </a>
-              ))
-            ) : (
-              <span className="empty-outline">No headings</span>
-            )}
-          </aside>
-        )}
+              <div
+                className={`key-points-summary ${aiSummaryStatus === 'summarizing' ? 'is-loading' : ''}`}
+              >
+                <strong>Summary:</strong>
+                {aiSummaryStatus === 'summarizing' ? (
+                  <div className="key-points-summary-loading" aria-live="polite">
+                    <span className="key-points-summary-shimmer" aria-hidden="true" />
+                    <span>AI is synthesizing a summary from all key points…</span>
+                  </div>
+                ) : (
+                  <p>{aiSummary || buildHighlightSummary(keyPoints)}</p>
+                )}
+              </div>
+              {keyPointGroupsWithVisibility.length > 0 ? (
+                <div className="key-points-tree">
+                  {keyPointGroupsWithVisibility.map((group) => (
+                    <div className="key-points-group" key={group.key}>
+                      <button
+                        className="key-points-group-header"
+                        type="button"
+                        onClick={(e) => toggleKindGroup(group.key, e)}
+                      >
+                        <span className="outline-toggle" aria-hidden="true">
+                          {group.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                        </span>
+                        <span className={`key-point-kind key-point-${group.kind}`}>{group.label}</span>
+                        <span className="key-points-count">{group.items.length}</span>
+                      </button>
+                      {!group.isCollapsed && (
+                        <div className="key-points-items">
+                          {group.items.map((highlight, index) => {
+                            const itemKey = `${group.kind}-${highlight.text}-${index}`
+                            return (
+                              <a
+                                className={`key-points-item ${activeKeyPointId === itemKey ? 'active' : ''}`}
+                                href={`#${itemKey}`}
+                                key={itemKey}
+                                onClick={(e) => handleKeyPointClick(highlight, itemKey, e)}
+                              >
+                                <span className="key-points-item-text">{highlight.text}</span>
+                                {highlight.reason && (
+                                  <small className="key-points-item-reason">{highlight.reason}</small>
+                                )}
+                              </a>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="key-points-empty">
+                  {aiStatus === 'analyzing'
+                    ? 'AI is finding key points...'
+                    : 'Click AI Highlight to generate a quick summary.'}
+                </span>
+              )}
+            </aside>
+          ) : (
+            hasKeyPointsContent && (
+              <button
+                className="key-points-floating-tab"
+                type="button"
+                onClick={() => setShowKeyPoints(true)}
+                title="展开要点"
+              >
+                <PanelRight size={16} />
+              </button>
+            )
+          )}
+        </div>
       </main>
     </div>
   )
 }
 
-const RenderedBlock = memo(function RenderedBlock({
-  block,
-  blockIndex,
-  isEditing,
-  mode,
-  onBeginEdit,
-  onEndEdit,
-  onPatch,
-}: {
-  block: DocBlock
-  blockIndex: number
-  isEditing: boolean
-  mode: HighlightMode
-  onBeginEdit: () => void
-  onEndEdit: () => void
-  onPatch: (index: number, nextRaw: string) => void
-}) {
-  const blockRef = useRef<HTMLElement | null>(null)
-  const inputRef = useRef<HTMLTextAreaElement | null>(null)
-  const [draft, setDraft] = useState(getEditableRaw(block.raw))
-  const html = useMemo(() => renderMarkdownBlock(block.raw, mode), [block.hash, block.raw, mode])
+function loadAiSettings(): AiSettings {
+  const raw = localStorage.getItem(aiSettingsStorageKey)
+  if (!raw) return defaultAiSettings
 
-  useEffect(() => {
-    if (!isEditing) {
-      setDraft(getEditableRaw(block.raw))
-    }
-  }, [block.raw, isEditing])
-
-  useEffect(() => {
-    if (!isEditing) return
-
-    const input = inputRef.current
-    if (!input) return
-
-    resizeInput(input)
-    input.focus()
-    input.setSelectionRange(input.value.length, input.value.length)
-  }, [isEditing])
-
-  useEffect(() => {
-    const element = blockRef.current
-    if (!element || block.type !== 'code') return
-
-    if (!('IntersectionObserver' in window)) {
-      highlightCodeBlocksIn(element)
-      return
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          highlightCodeBlocksIn(element)
-          observer.disconnect()
-        }
-      },
-      { rootMargin: '600px 0px' },
-    )
-
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [block.hash, block.type, html])
-
-  return (
-    <section
-      className={`ml-block ml-block-${block.type} ${isEditing ? 'is-editing-block' : ''}`}
-      data-block-id={block.id}
-      onClick={() => {
-        if (!isEditing) {
-          onBeginEdit()
-        }
-      }}
-      ref={blockRef}
-    >
-      {isEditing ? (
-        <div className="block-editor">
-          <textarea
-            autoFocus
-            className="block-editor-input"
-            ref={inputRef}
-            rows={1}
-            spellCheck={false}
-            value={draft}
-            onBlur={onEndEdit}
-            onChange={(event) => {
-              const nextDraft = event.currentTarget.value
-              setDraft(nextDraft)
-              resizeInput(event.currentTarget)
-              onPatch(blockIndex, nextDraft)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.currentTarget.blur()
-              }
-            }}
-          />
-        </div>
-      ) : (
-        <div dangerouslySetInnerHTML={{ __html: html }} />
-      )}
-    </section>
-  )
-})
-
-function extractOutline(blocks: DocBlock[]) {
-  return blocks
-    .filter((block) => block.type === 'heading')
-    .map((block) => {
-      const match = /^(#{1,4})\s+(.+)$/.exec(block.raw.trim())
-      if (!match) return null
-
-      const text = match[2].replace(/[#*_`]/g, '').trim()
-      return {
-        level: match[1].length,
-        text,
-        id: text
-          .toLowerCase()
-          .replace(/[^\p{L}\p{N}]+/gu, '-')
-          .replace(/^-|-$/g, ''),
-      }
+  try {
+    const parsed = JSON.parse(raw) as Partial<AiSettings>
+    return mergeAiSettings({
+      ...parsed,
+      extractionLevel: isExtractionLevel(parsed.extractionLevel)
+        ? parsed.extractionLevel
+        : defaultAiSettings.extractionLevel,
     })
-    .filter((item): item is { level: number; text: string; id: string } => Boolean(item))
-}
-
-function scheduleIdle(callback: () => void) {
-  if ('requestIdleCallback' in window) {
-    const id = window.requestIdleCallback(callback, { timeout: 120 })
-    return () => window.cancelIdleCallback(id)
+  } catch {
+    return defaultAiSettings
   }
-
-  const id = globalThis.setTimeout(callback, 16)
-  return () => globalThis.clearTimeout(id)
 }
 
-function resizeInput(input: HTMLTextAreaElement) {
-  input.style.height = 'auto'
-  input.style.height = `${input.scrollHeight}px`
+function isExtractionLevel(value: unknown): value is ExtractionLevel {
+  return typeof value === 'string' && (extractionLevels as readonly string[]).includes(value)
 }
 
-function getBlockSuffix(raw: string) {
-  const match = /\n+$/.exec(raw)
-  return match?.[0] ?? '\n\n'
-}
-
-function getEditableRaw(raw: string) {
-  const suffix = getBlockSuffix(raw)
-  return raw.endsWith(suffix) ? raw.slice(0, -suffix.length) : raw
+function getErrorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return 'Ollama request timed out'
+  }
+  if (error instanceof TypeError) {
+    return 'Cannot reach Ollama. Check endpoint or CORS.'
+  }
+  if (error instanceof Error) {
+    return error.message
+  }
+  return 'AI request failed'
 }

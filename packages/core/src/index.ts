@@ -29,11 +29,24 @@ export interface DocBlock {
   end: number
   raw: string
   hash: string
+  dirty?: boolean
   level?: number
   language?: string
   html?: string
   highlights?: Highlight[]
   meta?: Record<string, unknown>
+}
+
+export interface EditorSelection {
+  anchor: number
+  head: number
+}
+
+export interface EditorDocumentState {
+  docText: string
+  selection: EditorSelection | null
+  activeBlockId: string | null
+  blocks: DocBlock[]
 }
 
 export interface Highlight {
