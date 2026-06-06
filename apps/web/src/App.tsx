@@ -18,7 +18,10 @@ import {
 } from 'lucide-react'
 import { BlockEditor, type BlockEditorHandle, type HeadingItem } from './components/BlockEditor'
 import { AiSettingsModal } from './components/AiSettingsModal'
+import { LocaleSwitcher } from './components/LocaleSwitcher'
 import { TutorialModal } from './components/TutorialModal'
+import { useI18n } from './lib/i18n/context'
+import { t } from './lib/i18n'
 import {
   clearAiHighlightCache,
   loadAiHighlightCache,
@@ -53,14 +56,6 @@ const extractionLevels: ExtractionLevel[] = ['low', 'medium', 'high']
 const maxAutosaveBytes = 512 * 1024
 const autosaveDebounceMs = 800
 const kindOrder = ['risk', 'decision', 'action', 'keyword', 'number', 'tech'] as const
-const kindLabels: Record<(typeof kindOrder)[number], string> = {
-  risk: 'Risks',
-  decision: 'Decisions',
-  action: 'Actions',
-  keyword: 'Keywords',
-  number: 'Numbers',
-  tech: 'Technical',
-}
 
 type AiStatus = 'idle' | 'testing' | 'connected' | 'analyzing' | 'done' | 'error'
 type AiSummaryStatus = 'idle' | 'summarizing' | 'done' | 'fallback'
@@ -71,6 +66,7 @@ interface AiProgress {
 }
 
 export function App() {
+  const { messages } = useI18n()
   const [theme, setTheme] = useState<Theme>('light')
   const [showOutline, setShowOutline] = useState(true)
   const [showAiSettings, setShowAiSettings] = useState(false)
@@ -93,8 +89,8 @@ export function App() {
   )
   const [aiMessage, setAiMessage] = useState(
     initialHighlightCache
-      ? `Restored ${initialHighlightCache.highlights.length} cached highlights`
-      : 'Local AI ready',
+      ? t().ai.restoredHighlights(initialHighlightCache.highlights.length)
+      : t().ai.ready,
   )
   const [aiProgress, setAiProgress] = useState<AiProgress>({ completed: 0, total: 0 })
   const [headings, setHeadings] = useState<HeadingItem[]>([])
@@ -195,9 +191,9 @@ export function App() {
     setAiSummary(cached.summary)
     setAiSummaryStatus('done')
     setAiStatus('done')
-    setAiMessage(`Restored ${cached.highlights.length} cached highlights`)
+    setAiMessage(messages.ai.restoredHighlights(cached.highlights.length))
     setShowKeyPoints(true)
-  }, [])
+  }, [messages.ai])
 
   const handleEditorChange = useCallback(() => {
     const handle = editorHandleRef.current
@@ -213,7 +209,7 @@ export function App() {
       setAiSummaryStatus('idle')
       setAiStatus('idle')
       setAiProgress({ completed: 0, total: 0 })
-      setAiMessage('AI highlights cleared after edit')
+      setAiMessage(messages.ai.clearedAfterEdit)
     }
 
     if (autosaveTimerRef.current !== undefined) {
@@ -226,7 +222,7 @@ export function App() {
         localStorage.setItem('highlightmd:source', md)
       }
     }, autosaveDebounceMs)
-  }, [aiHighlights.length])
+  }, [aiHighlights.length, messages.ai.clearedAfterEdit])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -276,11 +272,11 @@ export function App() {
     }
     return Array.from(groups.entries()).map(([kind, items]) => ({
       kind,
-      label: kindLabels[kind as (typeof kindOrder)[number]] ?? kind,
+      label: messages.kinds[kind as (typeof kindOrder)[number]] ?? kind,
       items,
       key: `kind-${kind}`,
     }))
-  }, [keyPoints])
+  }, [keyPoints, messages.kinds])
 
   const keyPointGroupsWithVisibility = useMemo(() => {
     return keyPointGroups.map((group) => ({
@@ -315,15 +311,15 @@ export function App() {
       setAiStatus(cached ? 'done' : 'idle')
       setAiMessage(
         cached
-          ? `Restored ${cached.highlights.length} cached highlights`
-          : 'Local AI ready',
+          ? messages.ai.restoredHighlights(cached.highlights.length)
+          : messages.ai.ready,
       )
       await editorHandleRef.current?.setMarkdown(text)
       editorHandleRef.current?.setAiHighlights(cached?.highlights ?? [])
       setHeadings(editorHandleRef.current?.getHeadings() ?? [])
       if (cached) setShowKeyPoints(true)
     } catch {
-      sourceRef.current = 'Unable to read this file.'
+      sourceRef.current = messages.ai.fileReadError
     }
   }
 
@@ -348,26 +344,26 @@ export function App() {
 
   async function handleTestAiConnection() {
     setAiStatus('testing')
-    setAiMessage('Testing Ollama...')
+    setAiMessage(messages.ai.testing)
 
     try {
       const result = await testOllamaConnection(aiSettings)
       setAiStatus('connected')
       setAiMessage(
         result.hasConfiguredModel
-          ? `Connected to ${aiSettings.model}`
-          : `Connected. Model not listed: ${aiSettings.model}`,
+          ? messages.ai.connected(aiSettings.model)
+          : messages.ai.connectedMissingModel(aiSettings.model),
       )
     } catch (error) {
       setAiStatus('error')
-      setAiMessage(getErrorMessage(error))
+      setAiMessage(getErrorMessage(error, messages))
     }
   }
 
   async function handleAiHighlight() {
     if (!aiSettings.enabled) {
       setAiStatus('idle')
-      setAiMessage('Enable local AI in settings first')
+      setAiMessage(messages.ai.enableFirst)
       setShowAiSettings(true)
       return
     }
@@ -383,7 +379,7 @@ export function App() {
     setAiSummary('')
     setAiSummaryStatus('idle')
     setAiProgress({ completed: 0, total: 1 })
-    setAiMessage('Starting quick AI scan...')
+    setAiMessage(messages.ai.startingScan)
     setShowKeyPoints(true)
 
     try {
@@ -401,8 +397,12 @@ export function App() {
           })
           setAiMessage(
             progress.totalChunks === 0
-              ? 'Preparing AI scan...'
-              : `AI chunk ${progress.completedChunks}/${progress.totalChunks} · ${progress.highlights.length} highlights`,
+              ? messages.ai.preparingScan
+              : messages.ai.chunkProgress(
+                  progress.completedChunks,
+                  progress.totalChunks,
+                  progress.highlights.length,
+                ),
           )
         },
       })
@@ -420,7 +420,7 @@ export function App() {
 
       if (highlights.length > 0) {
         setAiSummaryStatus('summarizing')
-        setAiMessage('Highlights ready · synthesizing summary...')
+        setAiMessage(messages.ai.highlightsReadySummarizing)
 
         const summary = await synthesizeHighlightSummary(highlights, aiSettings)
         if (id !== aiRequestIdRef.current) return
@@ -430,26 +430,25 @@ export function App() {
           setAiSummaryStatus('done')
           saveAiHighlightCache(source, highlights, summary)
           setAiMessage(
-            `AI highlighted ${highlights.length} items · summary ready in ${Math.round(performance.now() - startedAt)}ms`,
+            messages.ai.doneWithSummary(
+              highlights.length,
+              Math.round(performance.now() - startedAt),
+            ),
           )
         } else {
           setAiSummary(fallbackSummary)
           setAiSummaryStatus('fallback')
-          setAiMessage(
-            `Highlights ready · summary fallback after ${summaryRetryAttempts} attempts`,
-          )
+          setAiMessage(messages.ai.summaryFallback(summaryRetryAttempts))
         }
       } else {
         setAiSummaryStatus('idle')
-        setAiMessage(
-          `No highlights parsed — retried up to ${highlightRetryAttempts}x per chunk. Check model output format in Settings.`,
-        )
+        setAiMessage(messages.ai.noHighlightsParsed(highlightRetryAttempts))
       }
     } catch (error) {
       if (id !== aiRequestIdRef.current) return
       setAiStatus('error')
       setAiProgress({ completed: 0, total: 0 })
-      setAiMessage(getErrorMessage(error))
+      setAiMessage(getErrorMessage(error, messages))
     }
   }
 
@@ -475,7 +474,7 @@ export function App() {
         </div>
 
         <div className="toolbar">
-          <label className="icon-button" title="Open Markdown">
+          <label className="icon-button" title={messages.toolbar.openMarkdown}>
             <Upload size={18} />
             <input
               accept=".md,.markdown,text/markdown,text/plain"
@@ -483,22 +482,30 @@ export function App() {
               onChange={(event) => handleFiles(event.target.files)}
             />
           </label>
-          <button title="Presentation mode" type="button" onClick={() => setPresentation((v) => !v)}>
+          <button
+            title={messages.toolbar.presentation}
+            type="button"
+            onClick={() => setPresentation((v) => !v)}
+          >
             {presentation ? <Focus size={18} /> : <Presentation size={18} />}
           </button>
           <button
             className={`ai-highlight-button ${aiStatus === 'analyzing' ? 'is-loading' : ''}`}
             disabled={aiStatus === 'analyzing'}
-            title="AI Highlight"
+            title={messages.toolbar.aiHighlight}
             type="button"
             onClick={handleAiHighlight}
           >
             <Sparkles size={17} />
-            <span>{aiStatus === 'analyzing' ? 'Scanning' : 'AI Highlight'}</span>
+            <span>
+              {aiStatus === 'analyzing'
+                ? messages.toolbar.scanning
+                : messages.toolbar.aiHighlight}
+            </span>
           </button>
           <button
             className={showAiSettings ? 'active' : ''}
-            title="AI settings"
+            title={messages.toolbar.aiSettings}
             type="button"
             onClick={() => setShowAiSettings((value) => !value)}
           >
@@ -506,18 +513,23 @@ export function App() {
           </button>
           <button
             className={showTutorial ? 'active' : ''}
-            title="使用教程"
+            title={messages.toolbar.tutorial}
             type="button"
             onClick={() => setShowTutorial(true)}
           >
             <BookOpen size={18} />
           </button>
-          <button title="Export Markdown" type="button" onClick={handleExport}>
+          <button title={messages.toolbar.export} type="button" onClick={handleExport}>
             <Download size={18} />
           </button>
-          <button title="Theme" type="button" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+          <button
+            title={messages.toolbar.theme}
+            type="button"
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          >
             {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
           </button>
+          <LocaleSwitcher />
         </div>
       </header>
 
@@ -542,8 +554,12 @@ export function App() {
           {showOutline ? (
             <aside className="outline-pane left-pane">
               <div className="outline-header">
-                <strong>Outline</strong>
-                <button type="button" onClick={() => setShowOutline(false)} title="收起目录">
+                <strong>{messages.outline.title}</strong>
+                <button
+                  type="button"
+                  onClick={() => setShowOutline(false)}
+                  title={messages.outline.collapse}
+                >
                   <ChevronLeft size={16} />
                 </button>
               </div>
@@ -577,7 +593,7 @@ export function App() {
                   ))}
                 </div>
               ) : (
-                <span className="empty-outline">No headings</span>
+                <span className="empty-outline">{messages.outline.empty}</span>
               )}
             </aside>
           ) : (
@@ -585,7 +601,7 @@ export function App() {
               className="outline-floating-tab"
               type="button"
               onClick={() => setShowOutline(true)}
-              title="展开目录"
+              title={messages.outline.expand}
             >
               <PanelLeft size={16} />
             </button>
@@ -607,11 +623,14 @@ export function App() {
                 <div className="ai-progress-header">
                   <div className="ai-progress-title">
                     <span className="ai-spinner" />
-                    <strong>AI scanning key points</strong>
+                    <strong>{messages.progress.title}</strong>
                   </div>
                   <span>
-                    Chunk {aiProgress.completed} / {aiProgress.total} ·{' '}
-                    {aiHighlights.length} highlights ready
+                    {messages.progress.chunk(
+                      aiProgress.completed,
+                      aiProgress.total,
+                      aiHighlights.length,
+                    )}
                   </span>
                 </div>
                 <div
@@ -641,26 +660,33 @@ export function App() {
           {showKeyPoints && hasKeyPointsContent ? (
             <aside className="key-points-pane right-pane" aria-label="AI key points">
               <div className="key-points-header">
-                <strong>Key Points</strong>
-                <button type="button" onClick={() => setShowKeyPoints(false)} title="收起要点">
+                <strong>{messages.keyPoints.title}</strong>
+                <button
+                  type="button"
+                  onClick={() => setShowKeyPoints(false)}
+                  title={messages.keyPoints.collapse}
+                >
                   <ChevronRight size={16} />
                 </button>
               </div>
               <span className="key-points-meta">
                 {aiStatus === 'analyzing'
-                  ? `${aiProgress.completed}/${aiProgress.total || 1} scanning`
+                  ? messages.keyPoints.scanning(aiProgress.completed, aiProgress.total)
                   : aiSummaryStatus === 'summarizing'
-                    ? 'Synthesizing summary...'
-                    : `${keyPoints.length}/${extractionLevelLimits[aiSettings.extractionLevel]} highlights`}
+                    ? messages.keyPoints.synthesizing
+                    : messages.keyPoints.highlightCount(
+                        keyPoints.length,
+                        extractionLevelLimits[aiSettings.extractionLevel],
+                      )}
               </span>
               <div
                 className={`key-points-summary ${aiSummaryStatus === 'summarizing' ? 'is-loading' : ''}`}
               >
-                <strong>Summary:</strong>
+                <strong>{messages.keyPoints.summary}</strong>
                 {aiSummaryStatus === 'summarizing' ? (
                   <div className="key-points-summary-loading" aria-live="polite">
                     <span className="key-points-summary-shimmer" aria-hidden="true" />
-                    <span>AI is synthesizing a summary from all key points…</span>
+                    <span>{messages.keyPoints.synthesizingDetail}</span>
                   </div>
                 ) : (
                   <p>{aiSummary || buildHighlightSummary(keyPoints)}</p>
@@ -707,8 +733,8 @@ export function App() {
               ) : (
                 <span className="key-points-empty">
                   {aiStatus === 'analyzing'
-                    ? 'AI is finding key points...'
-                    : 'Click AI Highlight to generate a quick summary.'}
+                    ? messages.keyPoints.emptyAnalyzing
+                    : messages.keyPoints.emptyIdle}
                 </span>
               )}
             </aside>
@@ -718,7 +744,7 @@ export function App() {
                 className="key-points-floating-tab"
                 type="button"
                 onClick={() => setShowKeyPoints(true)}
-                title="展开要点"
+                title={messages.keyPoints.expand}
               >
                 <PanelRight size={16} />
               </button>
@@ -751,18 +777,18 @@ function isExtractionLevel(value: unknown): value is ExtractionLevel {
   return typeof value === 'string' && (extractionLevels as readonly string[]).includes(value)
 }
 
-function getErrorMessage(error: unknown) {
+function getErrorMessage(error: unknown, messages: ReturnType<typeof t>) {
   if (error instanceof OllamaCorsError) {
     return error.message
   }
   if (error instanceof DOMException && error.name === 'AbortError') {
-    return 'Ollama request timed out'
+    return messages.errors.timeout
   }
   if (error instanceof TypeError) {
-    return 'Cannot reach Ollama. Check endpoint or CORS.'
+    return messages.errors.unreachable
   }
   if (error instanceof Error) {
     return error.message
   }
-  return 'AI request failed'
+  return messages.errors.failed
 }

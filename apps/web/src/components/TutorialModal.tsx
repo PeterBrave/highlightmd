@@ -1,16 +1,19 @@
 import { useState } from 'react'
 import { BookOpen, X } from 'lucide-react'
-import { tutorialIntro, tutorialSections, type TutorialSection } from '../lib/tutorialContent'
+import { useI18n } from '../lib/i18n/context'
+import type { TutorialSection } from '../lib/i18n/types'
 
 interface TutorialModalProps {
   onClose: () => void
 }
 
 export function TutorialModal({ onClose }: TutorialModalProps) {
-  const [activeSectionId, setActiveSectionId] = useState(tutorialSections[0]?.id ?? 'start')
+  const { messages } = useI18n()
+  const { tutorial } = messages
+  const [activeSectionId, setActiveSectionId] = useState(tutorial.sections[0]?.id ?? 'start')
 
   const activeSection =
-    tutorialSections.find((section) => section.id === activeSectionId) ?? tutorialSections[0]
+    tutorial.sections.find((section) => section.id === activeSectionId) ?? tutorial.sections[0]
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -23,19 +26,24 @@ export function TutorialModal({ onClose }: TutorialModalProps) {
           <div className="tutorial-topbar-title">
             <BookOpen size={22} />
             <div>
-              <span className="tutorial-kicker">Guide</span>
-              <h2>{tutorialIntro.title}</h2>
-              <p>{tutorialIntro.description}</p>
+              <span className="tutorial-kicker">{tutorial.kicker}</span>
+              <h2>{tutorial.intro.title}</h2>
+              <p>{tutorial.intro.description}</p>
             </div>
           </div>
-          <button className="ai-settings-icon-button" type="button" onClick={onClose} title="Close">
+          <button
+            className="ai-settings-icon-button"
+            type="button"
+            onClick={onClose}
+            title={tutorial.close}
+          >
             <X size={18} />
           </button>
         </header>
 
         <div className="tutorial-layout">
           <nav className="tutorial-nav" aria-label="Tutorial sections">
-            {tutorialSections.map((section, index) => (
+            {tutorial.sections.map((section, index) => (
               <button
                 className={section.id === activeSectionId ? 'active' : ''}
                 key={section.id}
@@ -52,14 +60,14 @@ export function TutorialModal({ onClose }: TutorialModalProps) {
           </nav>
 
           <article className="tutorial-content">
-            {activeSection ? <TutorialSectionView section={activeSection} /> : null}
+            {activeSection ? <TutorialSectionView section={activeSection} tipsLabel={tutorial.tips} /> : null}
           </article>
         </div>
 
         <footer className="tutorial-footer">
-          <span>开源项目 · 可在 Settings 中自定义 Prompt 与模型绑定</span>
+          <span>{tutorial.footer}</span>
           <button className="ai-settings-primary-button" type="button" onClick={onClose}>
-            开始使用
+            {tutorial.getStarted}
           </button>
         </footer>
       </section>
@@ -67,7 +75,13 @@ export function TutorialModal({ onClose }: TutorialModalProps) {
   )
 }
 
-function TutorialSectionView({ section }: { section: TutorialSection }) {
+function TutorialSectionView({
+  section,
+  tipsLabel,
+}: {
+  section: TutorialSection
+  tipsLabel: string
+}) {
   return (
     <div className="tutorial-section">
       <header className="tutorial-section-head">
@@ -86,7 +100,7 @@ function TutorialSectionView({ section }: { section: TutorialSection }) {
 
       {section.tips && section.tips.length > 0 ? (
         <div className="tutorial-tips">
-          <strong>Tips</strong>
+          <strong>{tipsLabel}</strong>
           <ul>
             {section.tips.map((tip) => (
               <li key={tip}>{tip}</li>

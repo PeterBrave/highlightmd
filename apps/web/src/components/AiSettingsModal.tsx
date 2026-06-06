@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { Bot, Languages, Link2, Sparkles, X } from 'lucide-react'
 import {
   aiPromptFieldOrder,
-  aiPromptLabels,
   aiPromptVariables,
   defaultChinesePrompts,
   defaultEnglishPrompts,
@@ -13,6 +12,7 @@ import {
   type AiPrompts,
   type PromptLocale,
 } from '../lib/aiPrompts'
+import { useI18n } from '../lib/i18n/context'
 import { extractionLevelLimits, type AiSettings, type ExtractionLevel } from '../lib/ollama'
 
 type SettingsTab = 'general' | 'bindings' | 'prompts-en' | 'prompts-zh'
@@ -31,13 +31,6 @@ interface AiSettingsModalProps {
   onTestConnection: () => void
 }
 
-const settingsTabs: Array<{ id: SettingsTab; label: string; hint: string }> = [
-  { id: 'general', label: 'General', hint: 'Connection & model' },
-  { id: 'bindings', label: 'Model Bindings', hint: 'Prompt locale per model' },
-  { id: 'prompts-en', label: 'English Prompts', hint: 'For gemma, llama, mistral…' },
-  { id: 'prompts-zh', label: '中文 Prompts', hint: 'For qwen, deepseek, glm…' },
-]
-
 export function AiSettingsModal({
   aiMessage,
   aiSettings,
@@ -49,7 +42,20 @@ export function AiSettingsModal({
   onSettingsChange,
   onTestConnection,
 }: AiSettingsModalProps) {
+  const { messages } = useI18n()
+  const s = messages.settings
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+
+  const settingsTabs = useMemo(
+    () =>
+      [
+        { id: 'general' as const, label: s.tabs.general.label, hint: s.tabs.general.hint },
+        { id: 'bindings' as const, label: s.tabs.bindings.label, hint: s.tabs.bindings.hint },
+        { id: 'prompts-en' as const, label: s.tabs.promptsEn.label, hint: s.tabs.promptsEn.hint },
+        { id: 'prompts-zh' as const, label: s.tabs.promptsZh.label, hint: s.tabs.promptsZh.hint },
+      ] as const,
+    [s],
+  )
 
   const activeLocale = useMemo(
     () => resolvePromptLocale(aiSettings.model, aiSettings.modelBindings),
@@ -104,23 +110,21 @@ export function AiSettingsModal({
 
   function renderPromptEditor(locale: PromptLocale) {
     const prompts = aiSettings.promptPresets[locale]
+    const localeLabel = promptLocaleLabels[locale]
 
     return (
       <div className="ai-settings-panel">
         <div className="ai-settings-panel-head">
           <div>
-            <strong>{promptLocaleLabels[locale]} prompt pack</strong>
-            <p>
-              Placeholders are filled at runtime. Models bound to {promptLocaleLabels[locale]} will
-              use this pack.
-            </p>
+            <strong>{s.promptPackTitle(localeLabel)}</strong>
+            <p>{s.promptPackDesc(localeLabel)}</p>
           </div>
           <button
             className="ai-settings-soft-button"
             type="button"
             onClick={() => resetPromptPreset(locale)}
           >
-            Reset {promptLocaleLabels[locale]}
+            {s.resetPromptPack(localeLabel)}
           </button>
         </div>
 
@@ -128,7 +132,7 @@ export function AiSettingsModal({
           {aiPromptFieldOrder.map((field) => (
             <label className="ai-prompt-field" key={field}>
               <span className="ai-prompt-field-label">
-                {aiPromptLabels[field]}
+                {s.promptLabels[field]}
                 {aiPromptVariables[field].length > 0 ? (
                   <small>{aiPromptVariables[field].join(' · ')}</small>
                 ) : null}
@@ -155,11 +159,11 @@ export function AiSettingsModal({
       >
         <header className="ai-settings-topbar">
           <div>
-            <span className="ai-settings-kicker">Local AI Workspace</span>
-            <h2>Settings</h2>
-            <p>Connect Ollama, bind models to English or Chinese prompts, and tune extraction.</p>
+            <span className="ai-settings-kicker">{s.kicker}</span>
+            <h2>{s.title}</h2>
+            <p>{s.subtitle}</p>
           </div>
-          <button className="ai-settings-icon-button" type="button" onClick={onClose} title="Close">
+          <button className="ai-settings-icon-button" type="button" onClick={onClose} title={s.close}>
             <X size={18} />
           </button>
         </header>
@@ -185,18 +189,18 @@ export function AiSettingsModal({
                 <div className="ai-settings-status-card">
                   <span className={`ai-status-dot ai-status-${aiStatus}`} />
                   <div>
-                    <strong>Local AI highlights</strong>
+                    <strong>{s.localAi}</strong>
                     <span>{aiMessage}</span>
                   </div>
                   <span className={`ai-locale-badge ai-locale-${activeLocale}`}>
                     <Languages size={14} />
-                    Active: {promptLocaleLabels[activeLocale]}
+                    {s.activeLocale(promptLocaleLabels[activeLocale])}
                   </span>
                 </div>
 
                 <div className="ai-settings-form-grid">
                   <label>
-                    <span>Ollama endpoint</span>
+                    <span>{s.endpoint}</span>
                     <input
                       value={aiSettings.endpoint}
                       onChange={(event) =>
@@ -209,7 +213,7 @@ export function AiSettingsModal({
                   </label>
 
                   <label>
-                    <span>Model</span>
+                    <span>{s.model}</span>
                     {availableModels.length > 0 ? (
                       <select
                         value={aiSettings.model}
@@ -229,7 +233,7 @@ export function AiSettingsModal({
                     ) : (
                       <input
                         value={aiSettings.model}
-                        placeholder="e.g. gemma4:latest"
+                        placeholder={s.modelPlaceholder}
                         onChange={(event) =>
                           onSettingsChange((settings) => ({
                             ...settings,
@@ -253,17 +257,15 @@ export function AiSettingsModal({
                     }
                   />
                   <div>
-                    <strong>Enable local AI</strong>
-                    <span>Highlights and summaries stay on this device.</span>
+                    <strong>{s.enableLocalAi}</strong>
+                    <span>{s.enableLocalAiHint}</span>
                   </div>
                 </label>
 
                 <div className="ai-limit-control ai-limit-card">
                   <div className="ai-limit-card-head">
-                    <strong>Detail level</strong>
-                    <span>
-                      Up to {extractionLevelLimits[aiSettings.extractionLevel]} highlights per scan
-                    </span>
+                    <strong>{s.detailLevel}</strong>
+                    <span>{s.detailLevelHint(extractionLevelLimits[aiSettings.extractionLevel])}</span>
                   </div>
                   <div>
                     {extractionLevels.map((level) => (
@@ -278,7 +280,7 @@ export function AiSettingsModal({
                           }))
                         }
                       >
-                        {level.charAt(0).toUpperCase() + level.slice(1)}
+                        {s.detailLevels[level]}
                       </button>
                     ))}
                   </div>
@@ -290,11 +292,9 @@ export function AiSettingsModal({
               <div className="ai-settings-panel">
                 <div className="ai-settings-panel-head">
                   <div>
-                    <strong>Model → prompt locale</strong>
+                    <strong>{s.bindingsTitle}</strong>
                     <p>
-                      Bind a model name or prefix to English or Chinese prompts. Current model{' '}
-                      <code>{aiSettings.model}</code> resolves to{' '}
-                      <strong>{promptLocaleLabels[activeLocale]}</strong>.
+                      {s.bindingsDesc(aiSettings.model, promptLocaleLabels[activeLocale])}
                     </p>
                   </div>
                   <button
@@ -307,7 +307,7 @@ export function AiSettingsModal({
                       }))
                     }
                   >
-                    Reset bindings
+                    {s.resetBindings}
                   </button>
                 </div>
 
@@ -318,7 +318,7 @@ export function AiSettingsModal({
                         <Link2 size={16} />
                       </span>
                       <input
-                        placeholder="Model prefix, e.g. gemma or qwen2.5"
+                        placeholder={s.modelPrefixPlaceholder}
                         value={binding.model}
                         onChange={(event) => updateBinding(index, { model: event.target.value })}
                       />
@@ -328,14 +328,14 @@ export function AiSettingsModal({
                           updateBinding(index, { locale: event.target.value as PromptLocale })
                         }
                       >
-                        <option value="en">English</option>
-                        <option value="zh">中文</option>
+                        <option value="en">{promptLocaleLabels.en}</option>
+                        <option value="zh">{promptLocaleLabels.zh}</option>
                       </select>
                       <button
                         className="ai-settings-icon-button"
                         type="button"
                         onClick={() => removeBinding(index)}
-                        title="Remove binding"
+                        title={s.removeBinding}
                       >
                         <X size={16} />
                       </button>
@@ -344,13 +344,10 @@ export function AiSettingsModal({
                 </div>
 
                 <button className="ai-settings-soft-button" type="button" onClick={addBinding}>
-                  Add model binding
+                  {s.addBinding}
                 </button>
 
-                <div className="ai-settings-note">
-                  Matching is prefix-based: <code>gemma</code> matches <code>gemma4:latest</code>.
-                  If nothing matches, HightlightMD falls back to name heuristics.
-                </div>
+                <div className="ai-settings-note">{s.bindingsNote}</div>
               </div>
             ) : null}
 
@@ -361,7 +358,7 @@ export function AiSettingsModal({
 
         <footer className="ai-settings-footer">
           <button className="ai-settings-soft-button" type="button" onClick={onTestConnection}>
-            Test connection
+            {s.testConnection}
           </button>
           <button
             className={`ai-settings-primary-button ${aiStatus === 'analyzing' ? 'is-loading' : ''}`}
@@ -370,7 +367,7 @@ export function AiSettingsModal({
             onClick={onRunHighlight}
           >
             <Bot size={16} />
-            AI Highlight
+            {s.runHighlight}
           </button>
           <button
             className="ai-settings-soft-button"
@@ -387,7 +384,7 @@ export function AiSettingsModal({
             }
           >
             <Sparkles size={16} />
-            Reset all prompts
+            {s.resetAllPrompts}
           </button>
         </footer>
       </section>

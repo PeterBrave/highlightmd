@@ -1,4 +1,5 @@
 import type { HighlightKind } from '@highlightmd/core'
+import { getOllamaAllowSiteCommand, t } from './i18n'
 import {
   defaultModelBindings,
   defaultPromptPresets,
@@ -116,11 +117,6 @@ export function getDefaultOllamaEndpoint() {
     return '/ollama'
   }
   return `http://localhost:${ollamaDirectPort}`
-}
-
-export function getOllamaOriginsSetupCommand() {
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://peterbrave.github.io'
-  return `npm run ollama:allow-site -- ${origin}`
 }
 
 export const defaultAiSettings: AiSettings = {
@@ -655,9 +651,10 @@ function migrateStoredOllamaEndpoint(endpoint: string) {
 }
 
 function buildCorsHelpMessage() {
+  const messages = t()
   if (isLocalWebAppHost()) {
-    return 'Ollama blocked the browser request. Check that Ollama is running.'
+    return messages.errors.ollamaBlockedLocal
   }
 
-  return `Ollama blocked this page (CORS). Run once in terminal: ${getOllamaOriginsSetupCommand()}`
+  return messages.errors.ollamaCors(getOllamaAllowSiteCommand())
 }

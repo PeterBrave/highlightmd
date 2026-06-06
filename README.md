@@ -1,95 +1,129 @@
 # HightlightMD
 
-HightlightMD is an open-source Markdown reader and editor that uses AI to find the most important words, ideas, risks, numbers, and action items in your document, then highlights them for faster reading and better presentations.
+**English** · [简体中文](README.zh-CN.md)
 
-It turns long Markdown documents, READMEs, PRDs, RFCs, meeting notes, and technical specs into scannable, presentation-friendly reading views.
+**Live demo:** https://peterbrave.github.io/highlightmd/
+
+HightlightMD is an open-source Markdown reader and editor that uses local AI to surface the most important words, ideas, risks, numbers, and action items in your document — then highlights them for faster reading and better presentations.
+
+It turns long Markdown documents, READMEs, PRDs, RFCs, meeting notes, and technical specs into scannable, presentation-friendly views.
 
 ## Why HightlightMD
 
-Most Markdown editors help you write. HightlightMD helps you present.
+Most Markdown editors help you **write**. HightlightMD helps you **present**.
 
-When you are reviewing a document, explaining a proposal, or walking through a technical design, the hard part is not rendering Markdown. The hard part is knowing what the audience should notice first.
-
-HightlightMD focuses on one core idea:
+When you review a document, explain a proposal, or walk through a technical design, the hard part is not rendering Markdown. The hard part is knowing what the audience should notice first.
 
 > Use AI to quickly recognize key information in text and highlight it directly inside the reading experience.
 
-The goal is to make important content stand out while keeping the document local, private, and easy to share.
+Documents stay on your device. Highlights and summaries run through **Ollama** on your machine whenever possible.
 
-## Core Idea
+## Features
 
-HightlightMD highlights the parts of a document that matter most:
+- Paste or drag in `.md` files
+- Block-based Markdown editing with auto outline
+- Local AI highlights (risks, decisions, actions, keywords, numbers, tech terms)
+- Key Points panel with category grouping and jump-to-highlight
+- AI summary synthesized from all key points
+- Presentation mode, light/dark theme, export to `.md`
+- English / 中文 UI (switch in the toolbar)
+- Browser-local autosave and highlight cache
 
-- Keywords and key concepts
-- Risks and blockers
-- Decisions and conclusions
-- Numbers, dates, owners, and deadlines
-- Action items and next steps
-- Technical terms in engineering documents
+## Quick start
 
-This makes Markdown easier to scan, review, and present. Instead of manually bolding everything before a meeting, you can let the editor help surface what deserves attention.
+### Try online
 
-## Web MVP
+1. Open https://peterbrave.github.io/highlightmd/
+2. Upload a Markdown file or edit the sample document
+3. Set up Ollama once (see below), then click **AI Highlight**
 
-The first version includes:
-
-- Paste Markdown
-- Drag in `.md` files
-- Markdown rendering
-- Local AI highlights through Ollama
-- Fast key-point scanning
-- Presentation mode
-- Reading controls
-- Local-only document processing
-
-## AI Roadmap
-
-HightlightMD is designed to become a local-first AI Markdown editor.
-
-Planned AI features:
-
-- Use local models through Ollama
-- Detect document keywords and important sentences
-- Explain why a section was highlighted
-- Let users accept, remove, or tune AI highlights
-- Keep document analysis local whenever possible
-
-The long-term vision is simple: install a local model, open a Markdown document, and get an AI-assisted presentation view without sending private documents to the cloud.
-
-## Product Direction
-
-HightlightMD will start as a Web / PWA app and later expand into a macOS app built on the same foundation.
-
-The project is open source because Markdown, local-first tools, and personal AI workflows should be easy to inspect, remix, and improve.
-
-## Run
+### Run locally
 
 ```bash
+git clone https://github.com/PeterBrave/highlightmd.git
+cd highlightmd
 npm install
 npm run dev
 ```
 
-The web app runs from `apps/web`.
+Open the URL shown in the terminal (usually `http://localhost:5173`). Local dev proxies Ollama through `/ollama` — no extra CORS setup needed.
 
-## Deploy
+## Use local AI (Ollama)
 
-Pushes to `main` build the site and publish it to GitHub Pages via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+### 1. Install Ollama and pull a model
 
-After the first successful deploy, enable GitHub Pages in the repository settings:
-
-1. Open **Settings → Pages**
-2. Set **Build and deployment → Source** to **GitHub Actions**
-
-The live site is available at https://peterbrave.github.io/highlightmd/.
-
-## Local Ollama from the hosted app
-
-The hosted app talks to Ollama on your machine at `http://localhost:11434`. Because GitHub Pages is a different origin, Ollama needs to allow it once:
+Install [Ollama](https://ollama.com/) and start it. Then pull a model, for example:
 
 ```bash
+ollama pull qwen3:8b
+# or
+ollama pull gemma3:latest
+```
+
+Default endpoint: `http://localhost:11434`
+
+### 2. Allow the hosted site (one-time, if you use GitHub Pages)
+
+The online app runs on `https://peterbrave.github.io`. Browsers treat requests to `localhost:11434` as cross-origin, so Ollama must allow that origin **once**:
+
+```bash
+cd highlightmd
 npm run ollama:allow-site
 ```
 
-That sets `OLLAMA_ORIGINS` and restarts Ollama. After that, keep the default endpoint in Settings — no extra process to run.
+This sets `OLLAMA_ORIGINS` and restarts Ollama. Keep endpoint at `http://localhost:11434` in **Settings**.
 
-For local development, `npm run dev` proxies Ollama through `/ollama` automatically.
+If you deploy to another URL:
+
+```bash
+npm run ollama:allow-site -- https://your-domain.example
+```
+
+### 3. Configure in the app
+
+1. Click **Settings** (gear icon)
+2. Set **Ollama endpoint** — `http://localhost:11434` for hosted app; `/ollama` is used automatically in `npm run dev`
+3. Choose a **model** name that matches your Ollama pull
+4. Click **Test connection**
+5. Click **AI Highlight** in the toolbar
+
+### 4. Tune extraction (optional)
+
+- **Detail level:** Low / Medium / High → up to 6 / 12 / 24 highlights per scan
+- **Model bindings:** Map model prefixes to English or 中文 prompt packs
+- **Prompts:** Customize highlight and summary prompts in Settings (open source)
+
+## In-app guide
+
+Click the **Guide** (book) icon in the toolbar for a step-by-step tutorial. Switch **EN / 中文** in the toolbar for UI language.
+
+## Development
+
+```bash
+npm run dev        # Vite dev server + /ollama proxy
+npm run build      # production build
+npm run typecheck  # TypeScript check
+npm run bench:web  # Playwright bench script
+```
+
+Monorepo layout:
+
+- `apps/web` — React + Vite web app
+- `packages/core` — shared highlight types and logic
+
+## Deploy
+
+Pushes to `main` publish to GitHub Pages via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+
+1. **Settings → Pages → Build and deployment → Source:** GitHub Actions
+2. After deploy, run `npm run ollama:allow-site` on each machine that uses AI from the hosted URL
+
+## Roadmap
+
+- Deeper local-first AI editing (accept / reject highlights, explain why)
+- macOS app on the same foundation
+- More languages beyond EN / 中文
+
+## License
+
+MIT — see [LICENSE](LICENSE).
