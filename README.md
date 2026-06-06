@@ -80,4 +80,4 @@ After the first successful deploy, enable GitHub Pages in the repository setting
 1. Open **Settings → Pages**
 2. Set **Build and deployment → Source** to **GitHub Actions**
 
-The live site will be available at `https://<your-github-username>.github.io/highlightmd/`.
+The live site is available at https://peterbrave.github.io/highlightmd/.
