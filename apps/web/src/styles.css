@@ -511,6 +511,54 @@ button {
   font-size: 12px;
 }
 
+.ai-cors-notice {
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-muted));
+}
+
+.ai-cors-notice strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.ai-cors-notice p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ai-cors-notice code {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-cors-notice-button {
+  margin-top: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-cors-notice-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .ai-locale-badge {
   display: inline-flex;
   gap: 6px;

@@ -96,9 +96,48 @@ export const extractionLevelLimits: Record<ExtractionLevel, number> = {
   high: 24,
 }
 
+export const ollamaDirectPort = 11434
+export const ollamaCorsProxyPort = 11435
+
+export class OllamaCorsError extends Error {
+  constructor(message = 'Ollama blocked the browser request (CORS).') {
+    super(message)
+    this.name = 'OllamaCorsError'
+  }
+}
+
+export function isLocalWebAppHost() {
+  if (typeof window === 'undefined') return true
+  const host = window.location.hostname
+  return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0'
+}
+
+export function getDefaultOllamaEndpoint() {
+  return isLocalWebAppHost()
+    ? `http://localhost:${ollamaDirectPort}`
+    : `http://localhost:${ollamaCorsProxyPort}`
+}
+
+export function normalizeStoredOllamaEndpoint(endpoint: string) {
+  const normalized = normalizeEndpoint(endpoint)
+  if (isLocalWebAppHost()) return normalized
+
+  const directEndpoints = new Set([
+    `http://localhost:${ollamaDirectPort}`,
+    `http://127.0.0.1:${ollamaDirectPort}`,
+  ])
+
+  return directEndpoints.has(normalized) ? getDefaultOllamaEndpoint() : normalized
+}
+
+export function getOllamaOriginsSetupCommand() {
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://peterbrave.github.io'
+  return `launchctl setenv OLLAMA_ORIGINS "${origin}" && killall Ollama 2>/dev/null; open -a Ollama`
+}
+
 export const defaultAiSettings: AiSettings = {
   enabled: true,
-  endpoint: 'http://localhost:11434',
+  endpoint: getDefaultOllamaEndpoint(),
   model: 'gemma4:latest',
   extractionLevel: 'medium',
   promptPresets: defaultPromptPresets,
@@ -110,9 +149,13 @@ interface LegacyAiSettings extends Partial<AiSettings> {
 }
 
 export function mergeAiSettings(partial: LegacyAiSettings = {}): AiSettings {
+  const endpoint = partial.endpoint?.trim()
+    ? normalizeStoredOllamaEndpoint(partial.endpoint)
+    : getDefaultOllamaEndpoint()
+
   return {
     enabled: partial.enabled ?? defaultAiSettings.enabled,
-    endpoint: partial.endpoint?.trim() || defaultAiSettings.endpoint,
+    endpoint,
     model: partial.model?.trim() || defaultAiSettings.model,
     extractionLevel: partial.extractionLevel ?? defaultAiSettings.extractionLevel,
     promptPresets: mergePromptPresets(partial.promptPresets, partial.prompts),
@@ -584,11 +627,39 @@ async function fetchWithTimeout(
   const timeoutId = window.setTimeout(() => controller.abort(), init.timeoutMs ?? 8000)
 
   try {
-    return await fetch(input, {
+    const response = await fetch(input, {
       ...init,
       signal: controller.signal,
     })
+
+    if (response.status === 403 && !isLocalWebAppHost()) {
+      throw new OllamaCorsError(buildCorsHelpMessage())
+    }
+
+    return response
+  } catch (error) {
+    if (error instanceof OllamaCorsError) {
+      throw error
+    }
+
+    if (error instanceof TypeError && !isLocalWebAppHost()) {
+      throw new OllamaCorsError(buildCorsHelpMessage())
+    }
+
+    throw error
   } finally {
     window.clearTimeout(timeoutId)
   }
+}
+
+function buildCorsHelpMessage() {
+  if (isLocalWebAppHost()) {
+    return 'Ollama blocked the browser request. Check that Ollama is running.'
+  }
+
+  return [
+    'Ollama blocked the browser request (CORS).',
+    `Run "npm run ollama:proxy" locally and set endpoint to http://localhost:${ollamaCorsProxyPort},`,
+    `or restart Ollama with: ${getOllamaOriginsSetupCommand()}`,
+  ].join(' ')
 }

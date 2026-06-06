@@ -32,6 +32,7 @@ import {
   mergeAiSettings,
   testOllamaConnection,
   fetchOllamaModels,
+  OllamaCorsError,
   extractionLevelLimits,
   synthesizeHighlightSummary,
   type AiHighlight,
@@ -751,6 +752,9 @@ function isExtractionLevel(value: unknown): value is ExtractionLevel {
 }
 
 function getErrorMessage(error: unknown) {
+  if (error instanceof OllamaCorsError) {
+    return error.message
+  }
   if (error instanceof DOMException && error.name === 'AbortError') {
     return 'Ollama request timed out'
   }

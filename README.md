@@ -81,3 +81,28 @@ After the first successful deploy, enable GitHub Pages in the repository setting
 2. Set **Build and deployment → Source** to **GitHub Actions**
 
 The live site is available at https://peterbrave.github.io/highlightmd/.
+
+## Local Ollama from the hosted app
+
+The hosted web app runs on GitHub Pages, so the browser treats requests to `http://localhost:11434` as cross-origin. Ollama rejects those preflight requests with `403 Forbidden` unless you configure CORS.
+
+Pick one option:
+
+**Option A — CORS proxy (recommended)**
+
+```bash
+npm run ollama:proxy
+```
+
+Then in Settings, set the Ollama endpoint to `http://localhost:11435`.
+
+**Option B — allow this site in Ollama**
+
+On macOS:
+
+```bash
+launchctl setenv OLLAMA_ORIGINS "https://peterbrave.github.io"
+killall Ollama 2>/dev/null; open -a Ollama
+```
+
+Replace the origin if you deploy to a different URL.

@@ -13,7 +13,7 @@ import {
   type AiPrompts,
   type PromptLocale,
 } from '../lib/aiPrompts'
-import { extractionLevelLimits, type AiSettings, type ExtractionLevel } from '../lib/ollama'
+import { extractionLevelLimits, type AiSettings, type ExtractionLevel, getDefaultOllamaEndpoint, getOllamaOriginsSetupCommand, isLocalWebAppHost, ollamaCorsProxyPort } from '../lib/ollama'
 
 type SettingsTab = 'general' | 'bindings' | 'prompts-en' | 'prompts-zh'
 
@@ -193,6 +193,32 @@ export function AiSettingsModal({
                     Active: {promptLocaleLabels[activeLocale]}
                   </span>
                 </div>
+
+                {!isLocalWebAppHost() ? (
+                  <aside className="ai-cors-notice">
+                    <strong>Hosted app needs a CORS bridge to local Ollama</strong>
+                    <p>
+                      Run <code>npm run ollama:proxy</code> in this repo, then use endpoint{' '}
+                      <code>{getDefaultOllamaEndpoint()}</code>.
+                    </p>
+                    <p>
+                      Or allow this site in Ollama and restart it:
+                      <code>{getOllamaOriginsSetupCommand()}</code>
+                    </p>
+                    <button
+                      type="button"
+                      className="ai-cors-notice-button"
+                      onClick={() =>
+                        onSettingsChange((settings) => ({
+                          ...settings,
+                          endpoint: `http://localhost:${ollamaCorsProxyPort}`,
+                        }))
+                      }
+                    >
+                      Use proxy endpoint ({ollamaCorsProxyPort})
+                    </button>
+                  </aside>
+                ) : null}
 
                 <div className="ai-settings-form-grid">
                   <label>

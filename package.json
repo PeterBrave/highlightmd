@@ -12,7 +12,8 @@
     "build": "npm --workspace @highlightmd/web run build",
     "preview": "npm --workspace @highlightmd/web run preview",
     "typecheck": "npm --workspace @highlightmd/web run typecheck",
-    "bench:web": "node scripts/bench-web.mjs"
+    "bench:web": "node scripts/bench-web.mjs",
+    "ollama:proxy": "node scripts/ollama-cors-proxy.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.2",
