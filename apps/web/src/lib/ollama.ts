@@ -97,7 +97,6 @@ export const extractionLevelLimits: Record<ExtractionLevel, number> = {
 }
 
 export const ollamaDirectPort = 11434
-export const ollamaCorsProxyPort = 11435
 
 export class OllamaCorsError extends Error {
   constructor(message = 'Ollama blocked the browser request (CORS).') {
@@ -113,26 +112,15 @@ export function isLocalWebAppHost() {
 }
 
 export function getDefaultOllamaEndpoint() {
-  return isLocalWebAppHost()
-    ? `http://localhost:${ollamaDirectPort}`
-    : `http://localhost:${ollamaCorsProxyPort}`
-}
-
-export function normalizeStoredOllamaEndpoint(endpoint: string) {
-  const normalized = normalizeEndpoint(endpoint)
-  if (isLocalWebAppHost()) return normalized
-
-  const directEndpoints = new Set([
-    `http://localhost:${ollamaDirectPort}`,
-    `http://127.0.0.1:${ollamaDirectPort}`,
-  ])
-
-  return directEndpoints.has(normalized) ? getDefaultOllamaEndpoint() : normalized
+  if (import.meta.env.DEV) {
+    return '/ollama'
+  }
+  return `http://localhost:${ollamaDirectPort}`
 }
 
 export function getOllamaOriginsSetupCommand() {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://peterbrave.github.io'
-  return `launchctl setenv OLLAMA_ORIGINS "${origin}" && killall Ollama 2>/dev/null; open -a Ollama`
+  return `npm run ollama:allow-site -- ${origin}`
 }
 
 export const defaultAiSettings: AiSettings = {
@@ -150,7 +138,7 @@ interface LegacyAiSettings extends Partial<AiSettings> {
 
 export function mergeAiSettings(partial: LegacyAiSettings = {}): AiSettings {
   const endpoint = partial.endpoint?.trim()
-    ? normalizeStoredOllamaEndpoint(partial.endpoint)
+    ? migrateStoredOllamaEndpoint(partial.endpoint)
     : getDefaultOllamaEndpoint()
 
   return {
@@ -652,14 +640,24 @@ async function fetchWithTimeout(
   }
 }
 
+function migrateStoredOllamaEndpoint(endpoint: string) {
+  const normalized = normalizeEndpoint(endpoint)
+
+  if (normalized === 'http://localhost:11435') {
+    return `http://localhost:${ollamaDirectPort}`
+  }
+
+  if (import.meta.env.DEV && (normalized === `http://localhost:${ollamaDirectPort}` || normalized === `http://127.0.0.1:${ollamaDirectPort}`)) {
+    return '/ollama'
+  }
+
+  return normalized
+}
+
 function buildCorsHelpMessage() {
   if (isLocalWebAppHost()) {
     return 'Ollama blocked the browser request. Check that Ollama is running.'
   }
 
-  return [
-    'Ollama blocked the browser request (CORS).',
-    `Run "npm run ollama:proxy" locally and set endpoint to http://localhost:${ollamaCorsProxyPort},`,
-    `or restart Ollama with: ${getOllamaOriginsSetupCommand()}`,
-  ].join(' ')
+  return `Ollama blocked this page (CORS). Run once in terminal: ${getOllamaOriginsSetupCommand()}`
 }

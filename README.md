@@ -84,25 +84,12 @@ The live site is available at https://peterbrave.github.io/highlightmd/.
 
 ## Local Ollama from the hosted app
 
-The hosted web app runs on GitHub Pages, so the browser treats requests to `http://localhost:11434` as cross-origin. Ollama rejects those preflight requests with `403 Forbidden` unless you configure CORS.
-
-Pick one option:
-
-**Option A — CORS proxy (recommended)**
+The hosted app talks to Ollama on your machine at `http://localhost:11434`. Because GitHub Pages is a different origin, Ollama needs to allow it once:
 
 ```bash
-npm run ollama:proxy
+npm run ollama:allow-site
 ```
 
-Then in Settings, set the Ollama endpoint to `http://localhost:11435`.
+That sets `OLLAMA_ORIGINS` and restarts Ollama. After that, keep the default endpoint in Settings — no extra process to run.
 
-**Option B — allow this site in Ollama**
-
-On macOS:
-
-```bash
-launchctl setenv OLLAMA_ORIGINS "https://peterbrave.github.io"
-killall Ollama 2>/dev/null; open -a Ollama
-```
-
-Replace the origin if you deploy to a different URL.
+For local development, `npm run dev` proxies Ollama through `/ollama` automatically.

@@ -9,4 +9,13 @@ export default defineConfig({
       '@highlightmd/core': '../../packages/core/src',
     },
   },
+  server: {
+    proxy: {
+      '/ollama': {
+        target: 'http://127.0.0.1:11434',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ollama/, ''),
+      },
+    },
+  },
 })
